@@ -1,0 +1,774 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "QueryAnswer",
+  "description": "responses to queries",
+  "anyOf": [
+    {
+      "description": "response listing the current authorized addresses",
+      "type": "object",
+      "required": [
+        "authorized_addresses"
+      ],
+      "properties": {
+        "authorized_addresses": {
+          "type": "object",
+          "required": [
+            "admins",
+            "minters",
+            "viewers"
+          ],
+          "properties": {
+            "admins": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/HumanAddr"
+              }
+            },
+            "minters": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/HumanAddr"
+              }
+            },
+            "viewers": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/HumanAddr"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "display a trait category",
+      "type": "object",
+      "required": [
+        "category"
+      ],
+      "properties": {
+        "category": {
+          "type": "object",
+          "required": [
+            "category_count",
+            "index",
+            "name",
+            "variant_count",
+            "variants"
+          ],
+          "properties": {
+            "category_count": {
+              "description": "number of categories",
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            },
+            "forced_cyclops": {
+              "description": "forced variant for cyclops",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "forced_jawless": {
+              "description": "forced variant if jawless",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "index": {
+              "description": "this category's index",
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            },
+            "name": {
+              "description": "trait category name",
+              "type": "string"
+            },
+            "variant_count": {
+              "description": "number of variants in this category",
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            },
+            "variants": {
+              "description": "paginated variants for this category",
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/VariantInfoPlus"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "display a layer variant",
+      "type": "object",
+      "required": [
+        "variant"
+      ],
+      "properties": {
+        "variant": {
+          "type": "object",
+          "required": [
+            "category_index",
+            "info"
+          ],
+          "properties": {
+            "category_index": {
+              "description": "the index of the category this variant belongs to",
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            },
+            "info": {
+              "description": "all the variant info",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/VariantInfoPlus"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "response for both CommonMetadata and TokenMetadata",
+      "type": "object",
+      "required": [
+        "metadata"
+      ],
+      "properties": {
+        "metadata": {
+          "type": "object",
+          "properties": {
+            "private_metadata": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Metadata"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "public_metadata": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Metadata"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "displays the layer categories that get skipped during rolls and the weights of jawed and jawless skulls",
+      "type": "object",
+      "required": [
+        "roll_config"
+      ],
+      "properties": {
+        "roll_config": {
+          "type": "object",
+          "required": [
+            "category_count",
+            "jaw_weight",
+            "jawless_weight",
+            "skip"
+          ],
+          "properties": {
+            "category_count": {
+              "description": "number of categories",
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            },
+            "jaw_weight": {
+              "description": "weight for jawed skulls",
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0.0
+            },
+            "jawless_weight": {
+              "description": "weight for jawless skulls",
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0.0
+            },
+            "skip": {
+              "description": "the categories that get skipped",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "displays the trait variants with dependencies (multiple layers)",
+      "type": "object",
+      "required": [
+        "dependencies"
+      ],
+      "properties": {
+        "dependencies": {
+          "type": "object",
+          "required": [
+            "count",
+            "dependencies"
+          ],
+          "properties": {
+            "count": {
+              "description": "number of dependencies",
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0.0
+            },
+            "dependencies": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/Dependencies"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "displays the launch trait variants that hide other trait variants",
+      "type": "object",
+      "required": [
+        "hiders"
+      ],
+      "properties": {
+        "hiders": {
+          "type": "object",
+          "required": [
+            "count",
+            "hiders"
+          ],
+          "properties": {
+            "count": {
+              "description": "number of hiders",
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0.0
+            },
+            "hiders": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/Dependencies"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "response from creating a new genetic images",
+      "type": "object",
+      "required": [
+        "new_genes"
+      ],
+      "properties": {
+        "new_genes": {
+          "type": "object",
+          "required": [
+            "genes"
+          ],
+          "properties": {
+            "genes": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/GeneInfo"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "info needed by alchemy/reveal contracts",
+      "type": "object",
+      "required": [
+        "serve_alchemy"
+      ],
+      "properties": {
+        "serve_alchemy": {
+          "type": "object",
+          "required": [
+            "category_names",
+            "dependencies",
+            "skip"
+          ],
+          "properties": {
+            "category_names": {
+              "description": "category names",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "dependencies": {
+              "description": "variant display dependencies",
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/StoredDependencies"
+              }
+            },
+            "skip": {
+              "description": "categories that are skipped when rolling/revealing",
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "format": "uint8",
+                "minimum": 0.0
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "definitions": {
+    "Authentication": {
+      "description": "media file authentication",
+      "type": "object",
+      "properties": {
+        "key": {
+          "description": "either a decryption key for encrypted files or a password for basic authentication",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "user": {
+          "description": "username used in basic authentication",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "Dependencies": {
+      "description": "describes a trait that has multiple layers",
+      "type": "object",
+      "required": [
+        "correlated",
+        "id"
+      ],
+      "properties": {
+        "correlated": {
+          "description": "the other layers that are correlated to this variant",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/LayerId"
+          }
+        },
+        "id": {
+          "description": "id of the layer variant that has dependencies",
+          "allOf": [
+            {
+              "$ref": "#/definitions/LayerId"
+            }
+          ]
+        }
+      }
+    },
+    "Extension": {
+      "description": "metadata extension You can add any metadata fields you need here.  These fields are based on https://docs.opensea.io/docs/metadata-standards and are the metadata fields that Stashh uses for robust NFT display.  Urls should be prefixed with `http://`, `https://`, `ipfs://`, or `ar://`",
+      "type": "object",
+      "properties": {
+        "animation_url": {
+          "description": "url to a multimedia attachment",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "attributes": {
+          "description": "item attributes",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/Trait"
+          }
+        },
+        "background_color": {
+          "description": "background color represented as a six-character hexadecimal without a pre-pended #",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "description": {
+          "description": "item description",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "external_url": {
+          "description": "url to allow users to view the item on your site",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "image": {
+          "description": "url to the image",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "image_data": {
+          "description": "raw SVG image data (not recommended). Only use this if you're not including the image parameter",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "media": {
+          "description": "media files as specified on Stashh that allows for basic authenticatiion and decryption keys. Most of the above is used for bridging public eth NFT metadata easily, whereas `media` will be used when minting NFTs on Stashh",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/MediaFile"
+          }
+        },
+        "name": {
+          "description": "name of the item",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "protected_attributes": {
+          "description": "a select list of trait_types that are in the private metadata.  This will only ever be used in public metadata",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "youtube_url": {
+          "description": "url to a YouTube video",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "GeneInfo": {
+      "description": "genetic image information",
+      "type": "object",
+      "required": [
+        "current_image",
+        "genetic_image",
+        "unique_check"
+      ],
+      "properties": {
+        "current_image": {
+          "description": "image at time of minting",
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0.0
+          }
+        },
+        "genetic_image": {
+          "description": "complete genetic image",
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0.0
+          }
+        },
+        "unique_check": {
+          "description": "image used for uniqueness checks",
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0.0
+          }
+        }
+      }
+    },
+    "HumanAddr": {
+      "type": "string"
+    },
+    "LayerId": {
+      "description": "identifies a layer",
+      "type": "object",
+      "required": [
+        "category",
+        "variant"
+      ],
+      "properties": {
+        "category": {
+          "description": "the layer category name",
+          "type": "string"
+        },
+        "variant": {
+          "description": "the variant name",
+          "type": "string"
+        }
+      }
+    },
+    "MediaFile": {
+      "description": "media file",
+      "type": "object",
+      "required": [
+        "url"
+      ],
+      "properties": {
+        "authentication": {
+          "description": "authentication information",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Authentication"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "extension": {
+          "description": "file extension",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "file_type": {
+          "description": "file type Stashh currently uses: \"image\", \"video\", \"audio\", \"text\", \"font\", \"application\"",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "url": {
+          "description": "url to the file.  Urls should be prefixed with `http://`, `https://`, `ipfs://`, or `ar://`",
+          "type": "string"
+        }
+      }
+    },
+    "Metadata": {
+      "description": "token metadata",
+      "type": "object",
+      "properties": {
+        "extension": {
+          "description": "optional on-chain metadata.  Only use this if you are not using `token_uri`",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Extension"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "token_uri": {
+          "description": "optional uri for off-chain metadata.  This should be prefixed with `http://`, `https://`, `ipfs://`, or `ar://`.  Only use this if you are not using `extension`",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "StoredDependencies": {
+      "description": "describes a trait that has multiple layers",
+      "type": "object",
+      "required": [
+        "correlated",
+        "id"
+      ],
+      "properties": {
+        "correlated": {
+          "description": "the other layers that are correlated to this variant",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/StoredLayerId"
+          }
+        },
+        "id": {
+          "description": "id of the layer variant that has dependencies",
+          "allOf": [
+            {
+              "$ref": "#/definitions/StoredLayerId"
+            }
+          ]
+        }
+      }
+    },
+    "StoredLayerId": {
+      "description": "identifies a layer",
+      "type": "object",
+      "required": [
+        "category",
+        "variant"
+      ],
+      "properties": {
+        "category": {
+          "description": "the layer category",
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0.0
+        },
+        "variant": {
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0.0
+        }
+      }
+    },
+    "Trait": {
+      "description": "attribute trait",
+      "type": "object",
+      "required": [
+        "value"
+      ],
+      "properties": {
+        "display_type": {
+          "description": "indicates how a trait should be displayed",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "max_value": {
+          "description": "optional max value for numerical traits",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "trait_type": {
+          "description": "name of the trait",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "value": {
+          "description": "trait value",
+          "type": "string"
+        }
+      }
+    },
+    "VariantInfo": {
+      "description": "trait variant information",
+      "type": "object",
+      "required": [
+        "display_name",
+        "name",
+        "normal_weight"
+      ],
+      "properties": {
+        "cyclops_weight": {
+          "description": "randomization weight for cyclops",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "minimum": 0.0
+        },
+        "display_name": {
+          "description": "display name of the trait variant",
+          "type": "string"
+        },
+        "jawless_weight": {
+          "description": "randomization weight for this variant if jawless",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "minimum": 0.0
+        },
+        "name": {
+          "description": "trait variant name",
+          "type": "string"
+        },
+        "normal_weight": {
+          "description": "randomization weight for this trait variant if skull has 2 eyes and a jaw",
+          "type": "integer",
+          "format": "uint16",
+          "minimum": 0.0
+        },
+        "svg": {
+          "description": "svg data if name is not `None`",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "VariantInfoPlus": {
+      "description": "trait variant information with its index and dependencies",
+      "type": "object",
+      "required": [
+        "hides_at_launch",
+        "includes",
+        "index",
+        "variant_info"
+      ],
+      "properties": {
+        "hides_at_launch": {
+          "description": "trait variants it hides at launch",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/LayerId"
+          }
+        },
+        "includes": {
+          "description": "layer variants it includes",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/LayerId"
+          }
+        },
+        "index": {
+          "description": "index of variant",
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0.0
+        },
+        "variant_info": {
+          "description": "variant info",
+          "allOf": [
+            {
+              "$ref": "#/definitions/VariantInfo"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

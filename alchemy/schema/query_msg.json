@@ -1,0 +1,559 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "QueryMsg",
+  "description": "Queries",
+  "oneOf": [
+    {
+      "description": "displays the halt statuses for staking, crating, and alchemy",
+      "type": "object",
+      "required": [
+        "halt_statuses"
+      ],
+      "properties": {
+        "halt_statuses": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "displays the staking, crating, and alchemy states",
+      "type": "object",
+      "required": [
+        "states"
+      ],
+      "properties": {
+        "states": {
+          "type": "object",
+          "properties": {
+            "permit": {
+              "description": "optional permit used to verify admin identity.  If both viewer and permit are provided, the viewer will be ignored",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Permit_for_TokenPermissions"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "viewer": {
+              "description": "optional address and viewing key of an admin",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/ViewerInfo"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "lists the admin addresses",
+      "type": "object",
+      "required": [
+        "admins"
+      ],
+      "properties": {
+        "admins": {
+          "type": "object",
+          "properties": {
+            "permit": {
+              "description": "optional permit used to verify admin identity.  If both viewer and permit are provided, the viewer will be ignored",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Permit_for_TokenPermissions"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "viewer": {
+              "description": "optional address and viewing key of an admin",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/ViewerInfo"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "displays the code hashes and addresses of used contracts",
+      "type": "object",
+      "required": [
+        "contracts"
+      ],
+      "properties": {
+        "contracts": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "only displays a user's ingredients inventory (less intensive than MyStaking if you only need the inventory because it doesn't have to call the skulls contract to verify ownership of multiple skulls)",
+      "type": "object",
+      "required": [
+        "my_ingredients"
+      ],
+      "properties": {
+        "my_ingredients": {
+          "type": "object",
+          "properties": {
+            "permit": {
+              "description": "optional permit used to verify user identity.  If both viewer and permit are provided, the viewer will be ignored",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Permit_for_TokenPermissions"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "viewer": {
+              "description": "optional address and viewing key of a user",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/ViewerInfo"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "displays info about the skulls currently staked by the user and the ingredients they have in inventory",
+      "type": "object",
+      "required": [
+        "my_staking"
+      ],
+      "properties": {
+        "my_staking": {
+          "type": "object",
+          "properties": {
+            "permit": {
+              "description": "optional permit used to verify user identity.  If both viewer and permit are provided, the viewer will be ignored",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Permit_for_TokenPermissions"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "viewer": {
+              "description": "optional address and viewing key of a user",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/ViewerInfo"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "displays if the user is eligible for a first time staking bonus",
+      "type": "object",
+      "required": [
+        "user_eligible_for_bonus"
+      ],
+      "properties": {
+        "user_eligible_for_bonus": {
+          "type": "object",
+          "properties": {
+            "permit": {
+              "description": "optional permit used to verify user identity.  If both viewer and permit are provided, the viewer will be ignored",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Permit_for_TokenPermissions"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "viewer": {
+              "description": "optional address and viewing key of a user",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/ViewerInfo"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "displays if the user and token list are eligible for a first time staking bonus",
+      "type": "object",
+      "required": [
+        "tokens_eligible_for_bonus"
+      ],
+      "properties": {
+        "tokens_eligible_for_bonus": {
+          "type": "object",
+          "required": [
+            "token_ids"
+          ],
+          "properties": {
+            "permit": {
+              "description": "optional permit used to verify user identity.  If both viewer and permit are provided, the viewer will be ignored",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Permit_for_TokenPermissions"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "token_ids": {
+              "description": "list of token ids to check",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "viewer": {
+              "description": "optional address and viewing key of a user",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/ViewerInfo"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "displays the skull materials and indices",
+      "type": "object",
+      "required": [
+        "materials"
+      ],
+      "properties": {
+        "materials": {
+          "type": "object",
+          "properties": {
+            "permit": {
+              "description": "optional permit used to verify admin identity.  If both viewer and permit are provided, the viewer will be ignored",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Permit_for_TokenPermissions"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "viewer": {
+              "description": "optional address and viewing key of an admin",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/ViewerInfo"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "displays the ingredients",
+      "type": "object",
+      "required": [
+        "ingredients"
+      ],
+      "properties": {
+        "ingredients": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "displays the ingredient sets",
+      "type": "object",
+      "required": [
+        "ingredient_sets"
+      ],
+      "properties": {
+        "ingredient_sets": {
+          "type": "object",
+          "properties": {
+            "page": {
+              "description": "optional page number to display.  Defaults to 0 (first page) if not provided",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint16",
+              "minimum": 0.0
+            },
+            "page_size": {
+              "description": "optional limit to the number of ingredient sets to show.  Defaults to 30 if not specified",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint16",
+              "minimum": 0.0
+            },
+            "permit": {
+              "description": "optional permit used to verify admin identity.  If both viewer and permit are provided, the viewer will be ignored",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Permit_for_TokenPermissions"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "viewer": {
+              "description": "optional address and viewing key of an admin",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/ViewerInfo"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "displays the staking table for a specified skull material",
+      "type": "object",
+      "required": [
+        "staking_table"
+      ],
+      "properties": {
+        "staking_table": {
+          "type": "object",
+          "properties": {
+            "by_index": {
+              "description": "optionally display by the material index",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint8",
+              "minimum": 0.0
+            },
+            "by_name": {
+              "description": "optionally display by the material name",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "permit": {
+              "description": "optional permit used to verify admin identity.  If both viewer and permit are provided, the viewer will be ignored",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Permit_for_TokenPermissions"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "viewer": {
+              "description": "optional address and viewing key of an admin",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/ViewerInfo"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  ],
+  "definitions": {
+    "Binary": {
+      "description": "Binary is a wrapper around Vec<u8> to add base64 de/serialization with serde. It also adds some helper methods to help encode inline.\n\nThis is only needed as serde-json-{core,wasm} has a horrible encoding for Vec<u8>. See also <https://github.com/CosmWasm/cosmwasm/blob/main/docs/MESSAGE_TYPES.md>.",
+      "type": "string"
+    },
+    "PermitParams_for_TokenPermissions": {
+      "type": "object",
+      "required": [
+        "allowed_tokens",
+        "chain_id",
+        "permissions",
+        "permit_name"
+      ],
+      "properties": {
+        "allowed_tokens": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "chain_id": {
+          "type": "string"
+        },
+        "permissions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/TokenPermissions"
+          }
+        },
+        "permit_name": {
+          "type": "string"
+        }
+      }
+    },
+    "PermitSignature": {
+      "type": "object",
+      "required": [
+        "pub_key",
+        "signature"
+      ],
+      "properties": {
+        "pub_key": {
+          "$ref": "#/definitions/PubKey"
+        },
+        "signature": {
+          "$ref": "#/definitions/Binary"
+        }
+      }
+    },
+    "Permit_for_TokenPermissions": {
+      "type": "object",
+      "required": [
+        "params",
+        "signature"
+      ],
+      "properties": {
+        "params": {
+          "$ref": "#/definitions/PermitParams_for_TokenPermissions"
+        },
+        "signature": {
+          "$ref": "#/definitions/PermitSignature"
+        }
+      }
+    },
+    "PubKey": {
+      "type": "object",
+      "required": [
+        "type",
+        "value"
+      ],
+      "properties": {
+        "type": {
+          "description": "ignored, but must be \"tendermint/PubKeySecp256k1\" otherwise the verification will fail",
+          "type": "string"
+        },
+        "value": {
+          "description": "Secp256k1 PubKey",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Binary"
+            }
+          ]
+        }
+      }
+    },
+    "TokenPermissions": {
+      "oneOf": [
+        {
+          "description": "Allowance for SNIP-20 - Permission to query allowance of the owner & spender",
+          "type": "string",
+          "enum": [
+            "allowance"
+          ]
+        },
+        {
+          "description": "Balance for SNIP-20 - Permission to query balance",
+          "type": "string",
+          "enum": [
+            "balance"
+          ]
+        },
+        {
+          "description": "History for SNIP-20 - Permission to query transfer_history & transaction_hisotry",
+          "type": "string",
+          "enum": [
+            "history"
+          ]
+        },
+        {
+          "description": "Owner permission indicates that the bearer of this permit should be granted all the access of the creator/signer of the permit.  SNIP-721 uses this to grant viewing access to all data that the permit creator owns and is whitelisted for. For SNIP-721 use, a permit with Owner permission should NEVER be given to anyone else.  If someone wants to share private data, they should whitelist the address they want to share with via a SetWhitelistedApproval tx, and that address will view the data by creating their own permit with Owner permission",
+          "type": "string",
+          "enum": [
+            "owner"
+          ]
+        }
+      ]
+    },
+    "ViewerInfo": {
+      "description": "the address and viewing key making an authenticated query request",
+      "type": "object",
+      "required": [
+        "address",
+        "viewing_key"
+      ],
+      "properties": {
+        "address": {
+          "description": "querying address",
+          "type": "string"
+        },
+        "viewing_key": {
+          "description": "authentication key string",
+          "type": "string"
+        }
+      }
+    }
+  }
+}

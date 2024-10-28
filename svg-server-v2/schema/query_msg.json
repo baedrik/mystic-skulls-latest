@@ -1,0 +1,673 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "QueryMsg",
+  "description": "Queries",
+  "oneOf": [
+    {
+      "description": "displays the category count and which ones are skipped when rolling",
+      "type": "object",
+      "required": [
+        "state"
+      ],
+      "properties": {
+        "state": {
+          "type": "object",
+          "properties": {
+            "permit": {
+              "description": "optional permit used to verify admin identity.  If both viewer and permit are provided, the viewer will be ignored",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Permit_for_TokenPermissions"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "viewer": {
+              "description": "optional address and viewing key of an admin",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/ViewerInfo"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "lists the authorized addresses for this server",
+      "type": "object",
+      "required": [
+        "authorized_addresses"
+      ],
+      "properties": {
+        "authorized_addresses": {
+          "type": "object",
+          "properties": {
+            "permit": {
+              "description": "optional permit used to verify admin identity.  If both viewer and permit are provided, the viewer will be ignored",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Permit_for_TokenPermissions"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "viewer": {
+              "description": "optional address and viewing key of an admin",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/ViewerInfo"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "displays a trait category",
+      "type": "object",
+      "required": [
+        "category"
+      ],
+      "properties": {
+        "category": {
+          "type": "object",
+          "properties": {
+            "display_svg": {
+              "description": "optionally true if svgs should be displayed.  Defaults to false",
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "index": {
+              "description": "optional category index to display",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint8",
+              "minimum": 0.0
+            },
+            "limit": {
+              "description": "max number of variants to display",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint8",
+              "minimum": 0.0
+            },
+            "name": {
+              "description": "optional category name to display",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "permit": {
+              "description": "optional permit used to verify admin identity.  If both viewer and permit are provided, the viewer will be ignored",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Permit_for_TokenPermissions"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "start_at": {
+              "description": "optional trait variant index to start at",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint8",
+              "minimum": 0.0
+            },
+            "viewer": {
+              "description": "optional address and viewing key of an admin",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/ViewerInfo"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "displays a layer variant",
+      "type": "object",
+      "required": [
+        "variant"
+      ],
+      "properties": {
+        "variant": {
+          "type": "object",
+          "properties": {
+            "by_index": {
+              "description": "optionally display by the category and variant indices",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/StoredLayerId"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "by_name": {
+              "description": "optionally display by the category and variant names",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/LayerId"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "display_svg": {
+              "description": "optionally true if svgs should be displayed.  Defaults to false",
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "permit": {
+              "description": "optional permit used to verify admin identity.  If both viewer and permit are provided, the viewer will be ignored",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Permit_for_TokenPermissions"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "viewer": {
+              "description": "optional address and viewing key of an admin",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/ViewerInfo"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "displays the common metadata",
+      "type": "object",
+      "required": [
+        "common_metadata"
+      ],
+      "properties": {
+        "common_metadata": {
+          "type": "object",
+          "properties": {
+            "permit": {
+              "description": "optional permit used to verify identity.  If both viewer and permit are provided, the viewer will be ignored",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Permit_for_TokenPermissions"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "viewer": {
+              "description": "optional address and viewing key of an admin, minter, or viewer",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/ViewerInfo"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "displays the trait variants with dependencies (multiple layers)",
+      "type": "object",
+      "required": [
+        "dependencies"
+      ],
+      "properties": {
+        "dependencies": {
+          "type": "object",
+          "properties": {
+            "limit": {
+              "description": "max number of dependencies to display",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint16",
+              "minimum": 0.0
+            },
+            "permit": {
+              "description": "optional permit used to verify admin identity.  If both viewer and permit are provided, the viewer will be ignored",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Permit_for_TokenPermissions"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "start_at": {
+              "description": "optional dependency index to start at",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint16",
+              "minimum": 0.0
+            },
+            "viewer": {
+              "description": "optional address and viewing key of an admin",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/ViewerInfo"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "generates metadata from the input image vector",
+      "type": "object",
+      "required": [
+        "token_metadata"
+      ],
+      "properties": {
+        "token_metadata": {
+          "type": "object",
+          "required": [
+            "image"
+          ],
+          "properties": {
+            "image": {
+              "description": "image indices",
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "format": "uint8",
+                "minimum": 0.0
+              }
+            },
+            "permit": {
+              "description": "optional permit used to verify admin identity.  If both viewer and permit are provided, the viewer will be ignored",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Permit_for_TokenPermissions"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "viewer": {
+              "description": "optional address and viewing key of an admin, minter or viewer",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/ViewerInfo"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "display info that achemy/reveal contracts will need",
+      "type": "object",
+      "required": [
+        "serve_alchemy"
+      ],
+      "properties": {
+        "serve_alchemy": {
+          "type": "object",
+          "required": [
+            "viewer"
+          ],
+          "properties": {
+            "viewer": {
+              "description": "address and viewing key of a reveal contract",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/ViewerInfo"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "display if a skull is a cyclops and if it is jawless",
+      "type": "object",
+      "required": [
+        "skull_type"
+      ],
+      "properties": {
+        "skull_type": {
+          "type": "object",
+          "required": [
+            "image",
+            "viewer"
+          ],
+          "properties": {
+            "image": {
+              "description": "image indices",
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "format": "uint8",
+                "minimum": 0.0
+              }
+            },
+            "viewer": {
+              "description": "address and viewing key of the alchemy contract",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/ViewerInfo"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "return the new image vec resulting from altering the specified layers",
+      "type": "object",
+      "required": [
+        "transmute"
+      ],
+      "properties": {
+        "transmute": {
+          "type": "object",
+          "required": [
+            "current",
+            "new_layers",
+            "viewer"
+          ],
+          "properties": {
+            "current": {
+              "description": "current image indices",
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "format": "uint8",
+                "minimum": 0.0
+              }
+            },
+            "new_layers": {
+              "description": "transmuted layers",
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/LayerId"
+              }
+            },
+            "viewer": {
+              "description": "address and viewing key of the alchemy contract",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/ViewerInfo"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "display the StoredLayerId for jawless and cyclops, and the info about skull materials",
+      "type": "object",
+      "required": [
+        "skull_type_plus"
+      ],
+      "properties": {
+        "skull_type_plus": {
+          "type": "object",
+          "required": [
+            "viewer"
+          ],
+          "properties": {
+            "viewer": {
+              "description": "address and viewing key of the alchemy contract",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/ViewerInfo"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  ],
+  "definitions": {
+    "Binary": {
+      "description": "Binary is a wrapper around Vec<u8> to add base64 de/serialization with serde. It also adds some helper methods to help encode inline.\n\nThis is only needed as serde-json-{core,wasm} has a horrible encoding for Vec<u8>. See also <https://github.com/CosmWasm/cosmwasm/blob/main/docs/MESSAGE_TYPES.md>.",
+      "type": "string"
+    },
+    "LayerId": {
+      "description": "identifies a layer",
+      "type": "object",
+      "required": [
+        "category",
+        "variant"
+      ],
+      "properties": {
+        "category": {
+          "description": "the layer category name",
+          "type": "string"
+        },
+        "variant": {
+          "description": "the variant name",
+          "type": "string"
+        }
+      }
+    },
+    "PermitParams_for_TokenPermissions": {
+      "type": "object",
+      "required": [
+        "allowed_tokens",
+        "chain_id",
+        "permissions",
+        "permit_name"
+      ],
+      "properties": {
+        "allowed_tokens": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "chain_id": {
+          "type": "string"
+        },
+        "permissions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/TokenPermissions"
+          }
+        },
+        "permit_name": {
+          "type": "string"
+        }
+      }
+    },
+    "PermitSignature": {
+      "type": "object",
+      "required": [
+        "pub_key",
+        "signature"
+      ],
+      "properties": {
+        "pub_key": {
+          "$ref": "#/definitions/PubKey"
+        },
+        "signature": {
+          "$ref": "#/definitions/Binary"
+        }
+      }
+    },
+    "Permit_for_TokenPermissions": {
+      "type": "object",
+      "required": [
+        "params",
+        "signature"
+      ],
+      "properties": {
+        "params": {
+          "$ref": "#/definitions/PermitParams_for_TokenPermissions"
+        },
+        "signature": {
+          "$ref": "#/definitions/PermitSignature"
+        }
+      }
+    },
+    "PubKey": {
+      "type": "object",
+      "required": [
+        "type",
+        "value"
+      ],
+      "properties": {
+        "type": {
+          "description": "ignored, but must be \"tendermint/PubKeySecp256k1\" otherwise the verification will fail",
+          "type": "string"
+        },
+        "value": {
+          "description": "Secp256k1 PubKey",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Binary"
+            }
+          ]
+        }
+      }
+    },
+    "StoredLayerId": {
+      "description": "identifies a layer",
+      "type": "object",
+      "required": [
+        "category",
+        "variant"
+      ],
+      "properties": {
+        "category": {
+          "description": "the layer category",
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0.0
+        },
+        "variant": {
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0.0
+        }
+      }
+    },
+    "TokenPermissions": {
+      "oneOf": [
+        {
+          "description": "Allowance for SNIP-20 - Permission to query allowance of the owner & spender",
+          "type": "string",
+          "enum": [
+            "allowance"
+          ]
+        },
+        {
+          "description": "Balance for SNIP-20 - Permission to query balance",
+          "type": "string",
+          "enum": [
+            "balance"
+          ]
+        },
+        {
+          "description": "History for SNIP-20 - Permission to query transfer_history & transaction_hisotry",
+          "type": "string",
+          "enum": [
+            "history"
+          ]
+        },
+        {
+          "description": "Owner permission indicates that the bearer of this permit should be granted all the access of the creator/signer of the permit.  SNIP-721 uses this to grant viewing access to all data that the permit creator owns and is whitelisted for. For SNIP-721 use, a permit with Owner permission should NEVER be given to anyone else.  If someone wants to share private data, they should whitelist the address they want to share with via a SetWhitelistedApproval tx, and that address will view the data by creating their own permit with Owner permission",
+          "type": "string",
+          "enum": [
+            "owner"
+          ]
+        }
+      ]
+    },
+    "ViewerInfo": {
+      "description": "the address and viewing key making an authenticated query request",
+      "type": "object",
+      "required": [
+        "address",
+        "viewing_key"
+      ],
+      "properties": {
+        "address": {
+          "description": "querying address",
+          "type": "string"
+        },
+        "viewing_key": {
+          "description": "authentication key string",
+          "type": "string"
+        }
+      }
+    }
+  }
+}

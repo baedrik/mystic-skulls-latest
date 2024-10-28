@@ -1,0 +1,182 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "QueryAnswer",
+  "description": "responses to queries",
+  "anyOf": [
+    {
+      "description": "displays the admins list",
+      "type": "object",
+      "required": [
+        "admins"
+      ],
+      "properties": {
+        "admins": {
+          "type": "object",
+          "required": [
+            "admins"
+          ],
+          "properties": {
+            "admins": {
+              "description": "current admin list",
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/HumanAddr"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "displays the revelation status",
+      "type": "object",
+      "required": [
+        "reveal_status"
+      ],
+      "properties": {
+        "reveal_status": {
+          "type": "object",
+          "required": [
+            "reveals_have_halted"
+          ],
+          "properties": {
+            "reveals_have_halted": {
+              "description": "true if revelation has halted",
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "displays cooldown periods",
+      "type": "object",
+      "required": [
+        "cooldowns"
+      ],
+      "properties": {
+        "cooldowns": {
+          "type": "object",
+          "required": [
+            "all_cooldown",
+            "random_cooldown",
+            "target_cooldown"
+          ],
+          "properties": {
+            "all_cooldown": {
+              "description": "cooldown period for revealing all",
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "random_cooldown": {
+              "description": "cooldown period for random reveals",
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "target_cooldown": {
+              "description": "cooldown period for targeted reveals",
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "displays the nft contract information",
+      "type": "object",
+      "required": [
+        "nft_contract"
+      ],
+      "properties": {
+        "nft_contract": {
+          "type": "object",
+          "required": [
+            "nft_contract"
+          ],
+          "properties": {
+            "nft_contract": {
+              "$ref": "#/definitions/ContractInfo"
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "displays times of last reveal",
+      "type": "object",
+      "required": [
+        "last_reveal_times"
+      ],
+      "properties": {
+        "last_reveal_times": {
+          "type": "object",
+          "required": [
+            "last_reveals"
+          ],
+          "properties": {
+            "last_reveals": {
+              "description": "list of last reveal times",
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/TokenTime"
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "definitions": {
+    "ContractInfo": {
+      "description": "code hash and address of a secret contract",
+      "type": "object",
+      "required": [
+        "address",
+        "code_hash"
+      ],
+      "properties": {
+        "address": {
+          "description": "contract's address",
+          "allOf": [
+            {
+              "$ref": "#/definitions/HumanAddr"
+            }
+          ]
+        },
+        "code_hash": {
+          "description": "contract's code hash string",
+          "type": "string"
+        }
+      }
+    },
+    "HumanAddr": {
+      "type": "string"
+    },
+    "TokenTime": {
+      "description": "timestamps associated with tokens",
+      "type": "object",
+      "required": [
+        "token_id"
+      ],
+      "properties": {
+        "timestamp": {
+          "description": "optional timestamp in seconds since 01/01/1970",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "token_id": {
+          "description": "token the timestamp corresponds to",
+          "type": "string"
+        }
+      }
+    }
+  }
+}
