@@ -587,6 +587,7 @@ pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
         QueryMsg::ServeAlchemy { viewer } => query_serve_alchemy(deps, viewer),
         QueryMsg::SkullType { viewer, image } => query_skull_type(deps, viewer, &image),
         QueryMsg::SkullTypePlus { viewer } => query_type_plus(deps, viewer),
+        QueryMsg::LayerNames { viewer, idx } => query_names(deps, viewer, idx),
         QueryMsg::Transmute {
             viewer,
             current,
@@ -671,6 +672,41 @@ fn query_skull_type(deps: Deps, viewer: ViewerInfo, image: &[u8]) -> StdResult<B
     to_binary(&QueryAnswer::SkullType {
         is_cyclops,
         is_jawless,
+    })
+}
+
+/// Returns StdResult<Binary> which displays category and variant names and variant indices
+/// for a specified category
+///
+/// # Arguments
+///
+/// * `deps` - reference to Extern containing all the contract's external dependencies
+/// * `viewer` - address and key making an authenticated query request
+/// * `cat_idx` - index of the category to display
+fn query_names(deps: Deps, viewer: ViewerInfo, cat_idx: u8) -> StdResult<Binary> {
+    // only allow viewers to call this
+    check_viewer(deps, viewer)?;
+
+    let cat_key = cat_idx.to_le_bytes();
+    // get the category
+    let cat_store = ReadonlyPrefixedStorage::new(deps.storage, PREFIX_CATEGORY);
+    let cat: Category =
+        may_load(&cat_store, &cat_key)?.ok_or_else(|| StdError::generic_err("Invalid index"))?;
+    let var_store = ReadonlyPrefixedStorage::multilevel(deps.storage, &[PREFIX_VARIANT, &cat_key]);
+    let mut variants: Vec<VariantIdxName> = Vec::new();
+    for idx in 0..cat.cnt {
+        let variant_info: VariantInfo = may_load(&var_store, &idx.to_le_bytes())?
+            .ok_or_else(|| StdError::generic_err("Variant storage is corrupt"))?;
+        variants.push(VariantIdxName {
+            idx,
+            name: variant_info.name,
+        });
+    }
+
+    to_binary(&QueryAnswer::LayerNames {
+        category_name: cat.name,
+        category_idx: cat_idx,
+        variants,
     })
 }
 

@@ -374,6 +374,43 @@
         }
       },
       "additionalProperties": false
+    },
+    {
+      "description": "display the category and variant names of a specified category and the variants' indices",
+      "type": "object",
+      "required": [
+        "layer_names"
+      ],
+      "properties": {
+        "layer_names": {
+          "type": "object",
+          "required": [
+            "category_idx",
+            "category_name",
+            "variants"
+          ],
+          "properties": {
+            "category_idx": {
+              "description": "category index specified in the query",
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            },
+            "category_name": {
+              "description": "name of the category",
+              "type": "string"
+            },
+            "variants": {
+              "description": "variants of this category",
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/VariantIdxName"
+              }
+            }
+          }
+        }
+      },
+      "additionalProperties": false
     }
   ],
   "definitions": {
@@ -693,7 +730,7 @@
           "minimum": 0.0
         },
         "name": {
-          "description": "display name of the variant",
+          "description": "name of the variant",
           "type": "string"
         }
       }

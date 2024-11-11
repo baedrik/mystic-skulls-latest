@@ -493,6 +493,39 @@
         }
       },
       "additionalProperties": false
+    },
+    {
+      "description": "display the category and variant names of a specified category and the variants' indices",
+      "type": "object",
+      "required": [
+        "layer_names"
+      ],
+      "properties": {
+        "layer_names": {
+          "type": "object",
+          "required": [
+            "idx",
+            "viewer"
+          ],
+          "properties": {
+            "idx": {
+              "description": "index of the category to display",
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            },
+            "viewer": {
+              "description": "address and viewing key of the alchemy contract",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/ViewerInfo"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "additionalProperties": false
     }
   ],
   "definitions": {

@@ -256,6 +256,13 @@ pub enum QueryMsg {
         /// address and viewing key of the alchemy contract
         viewer: ViewerInfo,
     },
+    /// display the category and variant names of a specified category and the variants' indices
+    LayerNames {
+        /// address and viewing key of the alchemy contract
+        viewer: ViewerInfo,
+        /// index of the category to display
+        idx: u8,
+    },
 }
 
 /// responses to queries
@@ -339,6 +346,15 @@ pub enum QueryAnswer {
         skull_idx: u8,
         /// list of all skull materials
         skull_variants: Vec<VariantIdxName>,
+    },
+    /// display the category and variant names of a specified category and the variants' indices
+    LayerNames {
+        /// name of the category
+        category_name: String,
+        /// category index specified in the query
+        category_idx: u8,
+        /// variants of this category
+        variants: Vec<VariantIdxName>,
     },
 }
 
@@ -546,6 +562,6 @@ impl StoredDependencies {
 pub struct VariantIdxName {
     /// index of the variant
     pub idx: u8,
-    /// display name of the variant
+    /// name of the variant
     pub name: String,
 }

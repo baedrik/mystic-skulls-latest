@@ -7,6 +7,8 @@ pub const ADMINS_KEY: &[u8] = b"admin";
 pub const MATERIALS_KEY: &[u8] = b"mater";
 /// storage key for the potion ingredients
 pub const INGREDIENTS_KEY: &[u8] = b"ingr";
+/// storage key for the category names
+pub const CATEGORIES_KEY: &[u8] = b"cats";
 /// storage key for the staking sets of ingredients
 pub const INGRED_SETS_KEY: &[u8] = b"seting";
 /// storage key for the StakingState
@@ -29,6 +31,8 @@ pub const PREFIX_USER_INGR_INVENTORY: &[u8] = b"usinv";
 pub const PREFIX_USER_STAKE: &[u8] = b"usrsk";
 /// storage prefix for a skull's staking info
 pub const PREFIX_SKULL_STAKE: &[u8] = b"sklstk";
+/// storage prefix for variant names
+pub const PREFIX_VARIANTS: &[u8] = b"vars";
 /// storage key for this contract's viewing key with other contracts
 pub const MY_VIEWING_KEY: &[u8] = b"myview";
 /// prefix for the storage of staking tables

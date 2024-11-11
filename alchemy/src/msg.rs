@@ -53,8 +53,12 @@ pub enum ExecuteMsg {
         /// list of address to revoke admin priveleges from
         admins: Vec<String>,
     },
-    /// retrieve info about skull types from the svg server
-    GetSkullTypeInfo {},
+    /// retrieve category and variant names and indices from the svg server of a specified
+    /// category
+    GetLayerNames {
+        /// category index
+        idx: u8,
+    },
     /// add ingredients
     AddIngredients { ingredients: Vec<String> },
     /// create named sets of ingredients for staking tables
@@ -171,6 +175,16 @@ pub enum ExecuteAnswer {
         skulls_contract: ContractInfo,
         /// crate contracts
         crate_contracts: Vec<ContractInfo>,
+    },
+    /// response from retrieving category and variant names and indices from the svg server of a
+    /// specified category
+    GetLayerNames {
+        /// name of the category
+        category_name: String,
+        /// category index specified in the query
+        category_idx: u8,
+        /// variants of this category
+        variants: Vec<VariantIdxName>,
     },
     /// response from revoking a permit
     RevokePermit { status: String },
@@ -461,6 +475,6 @@ pub struct EligibilityInfo {
 pub struct VariantIdxName {
     /// index of the variant
     pub idx: u8,
-    /// display name of the variant
+    /// name of the variant
     pub name: String,
 }

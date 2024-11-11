@@ -21,17 +21,17 @@ use crate::msg::{
     IngrSetWeight, IngredientQty, IngredientSet, InstantiateMsg, QueryAnswer, QueryMsg,
     StakingState, StakingTable, StoredLayerId, VariantIdxName, ViewerInfo,
 };
-use crate::server_msgs::{ServerQueryMsg, SkullTypePlusWrapper};
+use crate::server_msgs::{LayerNamesWrapper, ServerQueryMsg};
 use crate::snip721::{
     BatchNftDossierWrapper, Burn, ImageInfo, ImageInfoWrapper, Metadata, Snip721HandleMsg,
     Snip721QueryMsg, Trait,
 };
 use crate::state::{
     CrateState, SkullStakeInfo, StoredIngrSet, StoredSetWeight, ADMINS_KEY, ALCHEMY_STATE_KEY,
-    CRATES_KEY, CRATE_META_KEY, CRATE_STATE_KEY, INGREDIENTS_KEY, INGRED_SETS_KEY, MATERIALS_KEY,
-    MY_VIEWING_KEY, PREFIX_REVOKED_PERMITS, PREFIX_SKULL_STAKE, PREFIX_STAKING_TABLE,
-    PREFIX_USER_INGR_INVENTORY, PREFIX_USER_STAKE, SKULL_721_KEY, STAKING_STATE_KEY,
-    SVG_SERVER_KEY,
+    CATEGORIES_KEY, CRATES_KEY, CRATE_META_KEY, CRATE_STATE_KEY, INGREDIENTS_KEY, INGRED_SETS_KEY,
+    MATERIALS_KEY, MY_VIEWING_KEY, PREFIX_REVOKED_PERMITS, PREFIX_SKULL_STAKE,
+    PREFIX_STAKING_TABLE, PREFIX_USER_INGR_INVENTORY, PREFIX_USER_STAKE, PREFIX_VARIANTS,
+    SKULL_721_KEY, STAKING_STATE_KEY, SVG_SERVER_KEY,
 };
 use crate::storage::{load, may_load, save};
 
@@ -168,7 +168,7 @@ pub fn execute(deps: DepsMut, env: Env, info: MessageInfo, msg: ExecuteMsg) -> S
         ExecuteMsg::RemoveAdmins { admins } => {
             try_process_auth_list(deps, &info.sender, &admins, false)
         }
-        ExecuteMsg::GetSkullTypeInfo {} => try_get_skull_info(deps, &info.sender, env),
+        ExecuteMsg::GetLayerNames { idx } => try_get_names(deps, &info.sender, env, idx),
         ExecuteMsg::AddIngredients { ingredients } => {
             try_add_ingredients(deps, &info.sender, ingredients)
         }
@@ -916,14 +916,15 @@ fn try_add_ingredients(
 
 /// Returns StdResult<Response>
 ///
-/// get skull type and material info from the svg server
+/// get category and variant names and indices of a specified category from the svg server
 ///
 /// # Arguments
 ///
 /// * `deps` - a mutable reference to Extern containing all the contract's external dependencies
 /// * `sender` - a reference to the message sender
 /// * `env` - Env of contract's environment
-fn try_get_skull_info(deps: DepsMut, sender: &Addr, env: Env) -> StdResult<Response> {
+/// * `idx` - index of the category
+fn try_get_names(deps: DepsMut, sender: &Addr, env: Env, idx: u8) -> StdResult<Response> {
     // only allow admins to do this
     check_admin_tx(deps.as_ref(), sender)?;
     let svg_server = load::<StoreContractInfo>(deps.storage, SVG_SERVER_KEY)
@@ -933,27 +934,89 @@ fn try_get_skull_info(deps: DepsMut, sender: &Addr, env: Env) -> StdResult<Respo
         address: env.contract.address.into_string(),
         viewing_key,
     };
-    let st_plus = ServerQueryMsg::SkullTypePlus { viewer }
-        .query::<_, SkullTypePlusWrapper>(deps.querier, svg_server.code_hash, svg_server.address)?
-        .skull_type_plus;
-    let mut stk_st: StakingState = load(deps.storage, STAKING_STATE_KEY)?;
-    stk_st.skull_idx = st_plus.skull_idx;
-    save(deps.storage, STAKING_STATE_KEY, &stk_st)?;
-    let mut alc_st: AlchemyState = load(deps.storage, ALCHEMY_STATE_KEY)?;
-    alc_st.cyclops = st_plus.cyclops;
-    alc_st.jawless = st_plus.jawless;
-    save(deps.storage, ALCHEMY_STATE_KEY, &alc_st)?;
-
-    let mut materials = vec![String::new(); st_plus.skull_variants.len()];
-    for idx_name in st_plus.skull_variants.into_iter() {
-        materials[idx_name.idx as usize] = idx_name.name;
+    // get the names
+    let lyr_nm = ServerQueryMsg::LayerNames { viewer, idx }
+        .query::<_, LayerNamesWrapper>(deps.querier, svg_server.code_hash, svg_server.address)?
+        .layer_names;
+    let mut categories = may_load::<Vec<String>>(deps.storage, CATEGORIES_KEY)?.unwrap_or_default();
+    let size_idx = idx as usize;
+    if categories.len() < size_idx + 1 {
+        categories.resize_with(size_idx + 1, String::new);
     }
-    if materials.iter().any(|n| *n == String::new()) {
-        return Err(StdError::generic_err("Blank Name in skull material list"));
+    categories[size_idx] = lyr_nm.category_name.clone();
+    save(deps.storage, CATEGORIES_KEY, &categories)?;
+    let mut is_skull = false;
+    let mut is_jaw = false;
+    let mut is_eye_type = false;
+    let mut materials: Vec<String> = Vec::new();
+    let var_cnt = lyr_nm.variants.len();
+    if lyr_nm.category_name == *"Skull" {
+        // save the skull category index
+        let mut stk_st: StakingState = load(deps.storage, STAKING_STATE_KEY)?;
+        stk_st.skull_idx = lyr_nm.category_idx;
+        save(deps.storage, STAKING_STATE_KEY, &stk_st)?;
+        materials.resize_with(var_cnt, String::new);
+        is_skull = true;
+    } else if lyr_nm.category_name == *"Eye Type" {
+        is_eye_type = true;
+    } else if lyr_nm.category_name == *"Jaw Type" {
+        is_jaw = true;
     }
-    save(deps.storage, MATERIALS_KEY, &materials)?;
+    // if doing eye or jaw type
+    if is_eye_type || is_jaw {
+        let mut alc_st: AlchemyState = load(deps.storage, ALCHEMY_STATE_KEY)?;
+        let (var_name, err_msg, layer) = if is_eye_type {
+            // cyclops layer
+            (
+                "Eye Type.Cyclops",
+                "No variant named Eye Type.Cyclops",
+                &mut alc_st.cyclops,
+            )
+        } else {
+            // jawless layer
+            (
+                "None",
+                "Missing None variant for Jaw Type",
+                &mut alc_st.jawless,
+            )
+        };
+        layer.category = lyr_nm.category_idx;
+        layer.variant = lyr_nm
+            .variants
+            .iter()
+            .find(|v| v.name == var_name)
+            .ok_or_else(|| StdError::generic_err(err_msg))?
+            .idx;
+        save(deps.storage, ALCHEMY_STATE_KEY, &alc_st)?;
+    }
+    let mut variants: Vec<String> = vec![String::new(); var_cnt];
+    for idx_name in lyr_nm.variants.iter() {
+        variants[idx_name.idx as usize] = idx_name.name.to_string();
+        if is_skull {
+            let split: Vec<&str> = idx_name.name.split('.').collect();
+            materials[idx_name.idx as usize] = split[1].to_string();
+        }
+    }
+    if variants.iter().any(|n| *n == String::new()) {
+        return Err(StdError::generic_err("Blank Name in variant list"));
+    }
+    if is_skull {
+        save(deps.storage, MATERIALS_KEY, &materials)?;
+    }
+    let mut var_store = PrefixedStorage::new(deps.storage, PREFIX_VARIANTS);
+    save(
+        &mut var_store,
+        &lyr_nm.category_idx.to_le_bytes(),
+        &variants,
+    )?;
 
-    Ok(Response::default())
+    Ok(
+        Response::new().set_data(to_binary(&ExecuteAnswer::GetLayerNames {
+            category_name: lyr_nm.category_name,
+            category_idx: lyr_nm.category_idx,
+            variants: lyr_nm.variants,
+        })?),
+    )
 }
 
 /// Returns StdResult<Response>

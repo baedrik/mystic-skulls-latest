@@ -21,6 +21,13 @@ pub enum ServerQueryMsg {
         /// address and viewing key of the alchemy contract
         viewer: ViewerInfo,
     },
+    /// display the category and variant names of a specified category and the variants' indices
+    LayerNames {
+        /// address and viewing key of the alchemy contract
+        viewer: ViewerInfo,
+        /// index of the category to display
+        idx: u8,
+    },
 }
 
 impl Query for ServerQueryMsg {
@@ -44,6 +51,23 @@ pub struct SkullTypePlus {
 #[derive(Deserialize)]
 pub struct SkullTypePlusWrapper {
     pub skull_type_plus: SkullTypePlus,
+}
+
+/// category and variant names and indices
+#[derive(Deserialize)]
+pub struct LayerNames {
+    /// name of the category
+    pub category_name: String,
+    /// category index specified in the query
+    pub category_idx: u8,
+    /// variants of this category
+    pub variants: Vec<VariantIdxName>,
+}
+
+/// wrapper to deserialize LayerNames responses
+#[derive(Deserialize)]
+pub struct LayerNamesWrapper {
+    pub layer_names: LayerNames,
 }
 
 /// display the new image vec after transmuting the requested layers
