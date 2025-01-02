@@ -2,7 +2,7 @@ use base64::{engine::general_purpose, Engine as _};
 use rand_core::RngCore;
 
 use cosmwasm_std::{
-    entry_point, to_binary, Addr, Api, Binary, CanonicalAddr, CosmosMsg, Deps, DepsMut, Env,
+    entry_point, to_binary, Addr, Api, Binary, CanonicalAddr, CosmosMsg, Deps, DepsMut, Empty, Env,
     MessageInfo, Response, StdError, StdResult, Storage, Uint128,
 };
 use cosmwasm_storage::{PrefixedStorage, ReadonlyPrefixedStorage};
@@ -451,7 +451,11 @@ fn try_set_stake(
     let user_store = ReadonlyPrefixedStorage::new(deps.storage, PREFIX_USER_STAKE);
     let user_raw = deps.api.addr_canonicalize(sender.as_str())?;
     let user_key = user_raw.as_slice();
-    let do_claim = may_load::<Vec<String>>(&user_store, user_key)?.is_none();
+    let (old_list, do_claim) = if let Some(old) = may_load::<Vec<String>>(&user_store, user_key)? {
+        (old, false)
+    } else {
+        (Vec::new(), true)
+    };
     // if they never started claiming, but sent an empty list
     if do_claim && skull_cnt == 0 {
         return Err(StdError::generic_err(
@@ -480,7 +484,7 @@ fn try_set_stake(
             stk_inf.claim = now;
         }
         // if user has not been staking this skull
-        if stk_inf.addr != user_raw {
+        if stk_inf.addr != user_raw || !old_list.contains(&id_img.id) {
             stk_inf.addr = user_raw.clone();
             stk_inf.stake = now;
         }
@@ -2024,4 +2028,32 @@ fn uncrate(
     }
     save(&mut inv_store, user_key, &raw_inv)?;
     Ok(resp)
+}
+
+///////////////////////////////////// Migrate //////////////////////////////////////
+/// Returns StdResult<Response>
+///
+/// gives crate contracts the new code hash
+///
+/// # Arguments
+///
+/// * `deps` - mutable reference to Extern containing all the contract's external dependencies
+/// * `env` - Env of contract's environment
+/// * `msg` - Empty migrate msg
+#[entry_point]
+pub fn migrate(deps: DepsMut, env: Env, _msg: Empty) -> StdResult<Response> {
+    let raw_crates: Vec<StoreContractInfo> = load(deps.storage, CRATES_KEY)?;
+    let mut messages: Vec<CosmosMsg> = Vec::new();
+    for crat in raw_crates.into_iter() {
+        let hmn = crat.into_humanized(deps.api)?;
+        messages.push(
+            Snip721HandleMsg::RegisterReceiveNft {
+                code_hash: env.contract.code_hash.clone(),
+                also_implements_batch_receive_nft: true,
+            }
+            .to_cosmos_msg(hmn.code_hash, hmn.address, None)?,
+        );
+    }
+
+    Ok(Response::new().add_messages(messages))
 }

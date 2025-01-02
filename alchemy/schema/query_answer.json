@@ -625,7 +625,7 @@
           "minimum": 0.0
         },
         "name": {
-          "description": "display name of the variant",
+          "description": "name of the variant",
           "type": "string"
         }
       }

@@ -297,6 +297,43 @@
       "additionalProperties": false
     },
     {
+      "description": "response from retrieving category and variant names and indices from the svg server of a specified category",
+      "type": "object",
+      "required": [
+        "get_layer_names"
+      ],
+      "properties": {
+        "get_layer_names": {
+          "type": "object",
+          "required": [
+            "category_idx",
+            "category_name",
+            "variants"
+          ],
+          "properties": {
+            "category_idx": {
+              "description": "category index specified in the query",
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            },
+            "category_name": {
+              "description": "name of the category",
+              "type": "string"
+            },
+            "variants": {
+              "description": "variants of this category",
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/VariantIdxName"
+              }
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
       "description": "response from revoking a permit",
       "type": "object",
       "required": [
@@ -463,6 +500,26 @@
         },
         "value": {
           "description": "trait value",
+          "type": "string"
+        }
+      }
+    },
+    "VariantIdxName": {
+      "description": "a variant's index and display name",
+      "type": "object",
+      "required": [
+        "idx",
+        "name"
+      ],
+      "properties": {
+        "idx": {
+          "description": "index of the variant",
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0.0
+        },
+        "name": {
+          "description": "name of the variant",
           "type": "string"
         }
       }
