@@ -944,7 +944,7 @@ fn try_get_names(deps: DepsMut, sender: &Addr, env: Env, idx: u8) -> StdResult<R
         .layer_names;
     let mut categories = may_load::<Vec<String>>(deps.storage, CATEGORIES_KEY)?.unwrap_or_default();
     let size_idx = idx as usize;
-    if categories.len() < size_idx + 1 {
+    if size_idx >= categories.len() {
         categories.resize_with(size_idx + 1, String::new);
     }
     categories[size_idx] = lyr_nm.category_name.clone();
@@ -1143,11 +1143,81 @@ pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
             by_index,
             &env.contract.address,
         ),
+        QueryMsg::LayerNames {
+            viewer,
+            permit,
+            idx,
+            page,
+            page_size,
+        } => query_layers(
+            deps,
+            viewer,
+            permit,
+            idx,
+            page,
+            page_size,
+            &env.contract.address,
+        ),
         QueryMsg::States { viewer, permit } => {
             query_state(deps, viewer, permit, &env.contract.address)
         }
     };
     pad_query_result(response, BLOCK_SIZE)
+}
+
+/// Returns StdResult<Binary> displaying the layer names of the specified category
+///
+/// # Arguments
+///
+/// * `deps` - reference to Extern containing all the contract's external dependencies
+/// * `viewer` - optional address and key making an authenticated query request
+/// * `permit` - optional permit with "owner" permission
+/// * `idx` - index of the category to display
+/// * `page` - optional page to display
+/// * `page_size` - optional number of sets to display
+/// * `my_addr` - a reference to this contract's address
+fn query_layers(
+    deps: Deps,
+    viewer: Option<ViewerInfo>,
+    permit: Option<Permit>,
+    idx: u8,
+    page: Option<u16>,
+    page_size: Option<u16>,
+    my_addr: &Addr,
+) -> StdResult<Binary> {
+    // only allow admins to do this
+    check_admin_query(deps, viewer, permit, my_addr)?;
+
+    let mut categories = may_load::<Vec<String>>(deps.storage, CATEGORIES_KEY)?.unwrap_or_default();
+    let idx_big = idx as usize;
+    let cat_cnt = categories.len();
+    if idx_big >= cat_cnt {
+        return Err(StdError::generic_err(format!(
+            "There are only {} categories loaded",
+            cat_cnt
+        )));
+    }
+    let page = page.unwrap_or(0);
+    let limit = page_size.unwrap_or(30);
+    let skip = (page * limit) as usize;
+
+    let var_store = ReadonlyPrefixedStorage::new(deps.storage, PREFIX_VARIANTS);
+    let var_names = may_load::<Vec<String>>(&var_store, &idx.to_le_bytes())?.unwrap_or_default();
+
+    to_binary(&QueryAnswer::LayerNames {
+        category_name: categories.swap_remove(idx_big),
+        category_idx: idx,
+        variants: var_names
+            .into_iter()
+            .enumerate()
+            .skip(skip)
+            .take(limit as usize)
+            .map(|(i, n)| VariantIdxName {
+                idx: i as u8,
+                name: n,
+            })
+            .collect::<Vec<VariantIdxName>>(),
+    })
 }
 
 /// Returns StdResult<Binary> which displays staking and alchemy halt statuses

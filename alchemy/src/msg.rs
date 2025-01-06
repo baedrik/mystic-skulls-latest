@@ -35,6 +35,15 @@ pub enum ExecuteMsg {
     },
     /// remove ingredients from a user's inventory to mint an nft containing them
     CrateIngredients { ingredients: Vec<IngredientQty> },
+    /* TODO
+    /// consume 3 ingredients to rewind the state of a skull if eligible
+    Rewind {
+        /// the token id of the skull to be rewound
+        token_id: String,
+        /// the ingredients to consume
+        ingredients: Vec<IngredientQty>,
+    },
+    */
     /// Create a viewing key
     CreateViewingKey { entropy: String },
     /// Set a viewing key
@@ -285,6 +294,20 @@ pub enum QueryMsg {
         /// optionally display by the material index
         by_index: Option<u8>,
     },
+    /// displays the layer names of the specified category index
+    LayerNames {
+        /// optional address and viewing key of an admin
+        viewer: Option<ViewerInfo>,
+        /// optional permit used to verify admin identity.  If both viewer and permit
+        /// are provided, the viewer will be ignored
+        permit: Option<Permit>,
+        /// index of the category to display
+        idx: u8,
+        /// optional page number to display.  Defaults to 0 (first page) if not provided
+        page: Option<u16>,
+        /// optional limit to the number of layer names to show.  Defaults to 30 if not specified
+        page_size: Option<u16>,
+    },
 }
 
 /// responses to queries
@@ -353,6 +376,15 @@ pub enum QueryAnswer {
     IngredientSets { ingredient_sets: Vec<IngredientSet> },
     /// displays the staking table for a specified skull material
     StakingTable { staking_table: StakingTable },
+    /// displays the layer names of the specified category index
+    LayerNames {
+        /// name of the category
+        category_name: String,
+        /// category index specified in the query
+        category_idx: u8,
+        /// variants of this category
+        variants: Vec<VariantIdxName>,
+    },
 }
 
 /// the address and viewing key making an authenticated query request
