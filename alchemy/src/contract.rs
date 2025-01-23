@@ -345,7 +345,7 @@ fn try_brew(deps: DepsMut, sender: Addr, recipe: Vec<String>) -> StdResult<Respo
             let potion_name = derive_name(deps.storage, name_key, &mut Vec::new())?;
             public_metadata.extension.name = Some(potion_name.clone());
             let desc_store = ReadonlyPrefixedStorage::new(deps.storage, PREFIX_POTION_DESC);
-            if let Some(addition) = may_load::<String>(&desc_store, name_key)? {
+            if let Some(addition) = may_load::<String>(&desc_store, &idx_key)? {
                 public_metadata.extension.description = Some(format!(
                     "{}\n{}",
                     public_metadata.extension.description.ok_or_else(|| {
@@ -876,8 +876,15 @@ fn try_define_potions(
         if potion.jaw_only && !trn_st.jaw_only.contains(&alc_st.potion_cnt) {
             trn_st.jaw_only.push(alc_st.potion_cnt);
         }
+        let idx_key = alc_st.potion_cnt.to_le_bytes();
         let mut rul_store = PrefixedStorage::new(deps.storage, PREFIX_POTION_RULES);
-        save(&mut rul_store, &alc_st.potion_cnt.to_le_bytes(), &rule)?;
+        save(&mut rul_store, &idx_key, &rule)?;
+        // save the description postscript if applicable
+        if let Some(ps) = potion.description_postscript {
+            let mut descr_store = PrefixedStorage::new(deps.storage, PREFIX_POTION_DESC);
+            save(&mut descr_store, &idx_key, &ps)?;
+        }
+
         alc_st.potion_cnt = alc_st.potion_cnt.checked_add(1).ok_or_else(|| {
             StdError::generic_err("Reached implementation limit for potion definition")
         })?;
@@ -1704,6 +1711,7 @@ fn query_rules(
     let mut vars = vec![Vec::new(); cat_cnt];
     let rul_store = ReadonlyPrefixedStorage::new(deps.storage, PREFIX_POTION_RULES);
     let p2r_store = ReadonlyPrefixedStorage::new(deps.storage, PREFIX_POTION_IDX_2_RECIPE);
+    let descr_store = ReadonlyPrefixedStorage::new(deps.storage, PREFIX_POTION_DESC);
     let mut potion_rules = Vec::new();
 
     // TODO remove
@@ -1754,6 +1762,7 @@ fn query_rules(
                     .iter()
                     .map(|l| l.to_display(deps.storage, &categories, &mut vars))
                     .collect::<StdResult<Vec<VariantList>>>()?,
+                description_postscript: may_load::<String>(&descr_store, &ptn_key)?,
                 is_addition_potion: rules.is_add,
                 do_all_listed_potions: rules.do_all,
                 dye_style: rules.dye_style,

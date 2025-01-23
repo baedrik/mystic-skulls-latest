@@ -893,6 +893,13 @@
             "$ref": "#/definitions/TraitWeight"
           }
         },
+        "description_postscript": {
+          "description": "text description to add to the common potion metadata description",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "do_all_listed_potions": {
           "description": "true if all potions in potion_weights should be applied",
           "type": "boolean"

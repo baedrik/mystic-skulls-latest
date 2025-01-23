@@ -574,6 +574,8 @@ pub struct PotionStats {
     pub potion_weights: Vec<PotionWeight>,
     /// skull must have one of the listed traits
     pub required_traits: Vec<VariantList>,
+    /// text description to add to the common potion metadata description
+    pub description_postscript: Option<String>,
     /// true if this potion rolls a None into non-None
     pub is_addition_potion: bool,
     /// true if all potions in potion_weights should be applied
@@ -599,6 +601,8 @@ pub struct DisplayPotionRules {
     pub potion_weights: Vec<PotionWeight>,
     /// skull must have one of the listed traits
     pub required_traits: Vec<VariantList>,
+    /// text description to add to the common potion metadata description
+    pub description_postscript: Option<String>,
     /// true if this potion rolls a None into non-None
     pub is_addition_potion: bool,
     /// true if all potions in potion_weights should be applied
