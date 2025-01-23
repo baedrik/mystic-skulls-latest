@@ -264,12 +264,20 @@
           "type": "object",
           "required": [
             "crate_contracts",
+            "potion_contracts",
             "skulls_contract",
             "svg_server"
           ],
           "properties": {
             "crate_contracts": {
               "description": "crate contracts",
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/ContractInfo"
+              }
+            },
+            "potion_contracts": {
+              "description": "potion contracts",
               "type": "array",
               "items": {
                 "$ref": "#/definitions/ContractInfo"
@@ -327,6 +335,149 @@
               "items": {
                 "$ref": "#/definitions/VariantIdxName"
               }
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "response from retrieving dependencies and skipped categories from the svg server",
+      "type": "object",
+      "required": [
+        "get_dependencies"
+      ],
+      "properties": {
+        "get_dependencies": {
+          "type": "object",
+          "required": [
+            "nones",
+            "skip"
+          ],
+          "properties": {
+            "nones": {
+              "description": "None indices",
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "format": "uint8",
+                "minimum": 0.0
+              }
+            },
+            "skip": {
+              "description": "categories that are skipped when rolling",
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "format": "uint8",
+                "minimum": 0.0
+              }
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "response from disabling/enabling potions",
+      "type": "object",
+      "required": [
+        "disabled_potions"
+      ],
+      "properties": {
+        "disabled_potions": {
+          "type": "object",
+          "required": [
+            "disabled_potions"
+          ],
+          "properties": {
+            "disabled_potions": {
+              "description": "currently disabled potions",
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0.0
+              }
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "response from adding potion name keywords",
+      "type": "object",
+      "required": [
+        "add_name_keywords"
+      ],
+      "properties": {
+        "add_name_keywords": {
+          "type": "object",
+          "required": [
+            "first",
+            "fourth",
+            "second",
+            "third"
+          ],
+          "properties": {
+            "first": {
+              "description": "keywords for the first position",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "fourth": {
+              "description": "keywords for the fourth position",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "second": {
+              "description": "keywords for the second position",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "third": {
+              "description": "keywords for the third position",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "response from adding potion definitions",
+      "type": "object",
+      "required": [
+        "define_potions"
+      ],
+      "properties": {
+        "define_potions": {
+          "type": "object",
+          "required": [
+            "potion_count",
+            "potions_added"
+          ],
+          "properties": {
+            "potion_count": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0.0
+            },
+            "potions_added": {
+              "description": "number of potions added",
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0.0
             }
           }
         }

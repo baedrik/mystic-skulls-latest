@@ -1,6 +1,12 @@
 use crate::contract_info::ContractInfo;
 use crate::snip721::Metadata;
-use cosmwasm_std::{Addr, Binary, Uint128};
+use crate::state::{
+    AlchemyState, StakingState, StoredLayerId, StoredTraitWeight, StoredVariantList,
+    TransmuteState, Weighted, PREFIX_VARIANTS,
+};
+use crate::storage::may_load;
+use cosmwasm_std::{Addr, Binary, StdError, StdResult, Storage, Uint128};
+use cosmwasm_storage::ReadonlyPrefixedStorage;
 use schemars::JsonSchema;
 use secret_toolkit::permit::Permit;
 use serde::{Deserialize, Serialize};
@@ -18,6 +24,8 @@ pub struct InstantiateMsg {
     pub skulls_contract: ContractInfo,
     /// code hash and address of a crate contract
     pub crate_contract: ContractInfo,
+    /// code hash and address of a potion contract
+    pub potion_contract: ContractInfo,
     /// number of seconds to earn a staking charge (604800 for prod)
     pub charge_time: u64,
 }
@@ -68,8 +76,40 @@ pub enum ExecuteMsg {
         /// category index
         idx: u8,
     },
+    /// retrieve dependencies and skipped categories from the svg server
+    GetDependencies {},
+    /// disable potions
+    DisablePotions {
+        /// optional list of potion names to disable
+        by_name: Option<Vec<String>>,
+        /// optional list of potion indices to disable
+        by_index: Option<Vec<u16>>,
+    },
+    /// enable potions
+    EnablePotions {
+        /// optional list of potion names to enable
+        by_name: Option<Vec<String>>,
+        /// optional list of potion indices to enable
+        by_index: Option<Vec<u16>>,
+    },
     /// add ingredients
     AddIngredients { ingredients: Vec<String> },
+    /// add potion name keywords
+    AddNameKeywords {
+        /// keywords for the first position
+        first: Vec<String>,
+        /// keywords for the second position
+        second: Vec<String>,
+        /// keywords for the third position
+        third: Vec<String>,
+        /// keywords for the fourth position
+        fourth: Vec<String>,
+    },
+    /// add potion definitions
+    DefinePotions {
+        /// new potions
+        potion_definitions: Vec<PotionStats>,
+    },
     /// create named sets of ingredients for staking tables
     DefineIngredientSets { sets: Vec<IngredientSet> },
     /// create staking tables for specified skull materials
@@ -96,6 +136,8 @@ pub enum ExecuteMsg {
         skulls_contract: Option<ContractInfo>,
         /// optional crating contract (can either update the code hash of an existing one or add a new one)
         crate_contract: Option<ContractInfo>,
+        /// optional potion contract (can either update the code hash of an existing one or add a new one)
+        potion_contract: Option<ContractInfo>,
     },
     /// set the crate nft base metadata
     SetCrateMetadata { public_metadata: Metadata },
@@ -184,6 +226,8 @@ pub enum ExecuteAnswer {
         skulls_contract: ContractInfo,
         /// crate contracts
         crate_contracts: Vec<ContractInfo>,
+        /// potion contracts
+        potion_contracts: Vec<ContractInfo>,
     },
     /// response from retrieving category and variant names and indices from the svg server of a
     /// specified category
@@ -195,6 +239,36 @@ pub enum ExecuteAnswer {
         /// variants of this category
         variants: Vec<VariantIdxName>,
     },
+    /// response from retrieving dependencies and skipped categories from the svg server
+    GetDependencies {
+        /// categories that are skipped when rolling
+        skip: Vec<u8>,
+        /// None indices
+        nones: Vec<u8>,
+    },
+    /// response from disabling/enabling potions
+    DisabledPotions {
+        /// currently disabled potions
+        disabled_potions: Vec<u16>,
+    },
+    /// response from adding potion name keywords
+    AddNameKeywords {
+        /// keywords for the first position
+        first: Vec<String>,
+        /// keywords for the second position
+        second: Vec<String>,
+        /// keywords for the third position
+        third: Vec<String>,
+        /// keywords for the fourth position
+        fourth: Vec<String>,
+    },
+    /// response from adding potion definitions
+    DefinePotions {
+        /// number of potions added
+        potions_added: u16,
+        // current potion count
+        potion_count: u16,
+    },
     /// response from revoking a permit
     RevokePermit { status: String },
 }
@@ -205,8 +279,16 @@ pub enum ExecuteAnswer {
 pub enum QueryMsg {
     /// displays the halt statuses for staking, crating, and alchemy
     HaltStatuses {},
-    /// displays the staking, crating, and alchemy states
+    /// displays the staking, crating, transmute, and alchemy states
     States {
+        /// optional address and viewing key of an admin
+        viewer: Option<ViewerInfo>,
+        /// optional permit used to verify admin identity.  If both viewer and permit
+        /// are provided, the viewer will be ignored
+        permit: Option<Permit>,
+    },
+    /// displays the keywords used to generate potion names
+    NameKeywords {
         /// optional address and viewing key of an admin
         viewer: Option<ViewerInfo>,
         /// optional permit used to verify admin identity.  If both viewer and permit
@@ -282,6 +364,18 @@ pub enum QueryMsg {
         /// optional limit to the number of ingredient sets to show.  Defaults to 30 if not specified
         page_size: Option<u16>,
     },
+    /// displays the potion rules
+    PotionRules {
+        /// optional address and viewing key of an admin
+        viewer: Option<ViewerInfo>,
+        /// optional permit used to verify admin identity.  If both viewer and permit
+        /// are provided, the viewer will be ignored
+        permit: Option<Permit>,
+        /// optional page number to display.  Defaults to 0 (first page) if not provided
+        page: Option<u16>,
+        /// optional limit to the number of potions to show.  Defaults to 5 if not specified
+        page_size: Option<u16>,
+    },
     /// displays the staking table for a specified skull material
     StakingTable {
         /// optional address and viewing key of an admin
@@ -306,6 +400,18 @@ pub enum QueryMsg {
         /// optional page number to display.  Defaults to 0 (first page) if not provided
         page: Option<u16>,
         /// optional limit to the number of layer names to show.  Defaults to 30 if not specified
+        page_size: Option<u16>,
+    },
+    /// displays the trait variants with dependencies (multiple layers)
+    Dependencies {
+        /// optional address and viewing key of an admin
+        viewer: Option<ViewerInfo>,
+        /// optional permit used to verify admin identity.  If both viewer and permit
+        /// are provided, the viewer will be ignored
+        permit: Option<Permit>,
+        /// optional page number to display.  Defaults to 0 (first page) if not provided
+        page: Option<u16>,
+        /// optional limit to the number of dependencies to show.  Defaults to 30 if not specified
         page_size: Option<u16>,
     },
 }
@@ -334,10 +440,11 @@ pub enum QueryAnswer {
     },
     /// response listing the current admins
     Admins { admins: Vec<Addr> },
-    /// displays the staking, crating, and alchemy states
+    /// displays the staking, crating, transmute, and alchemy states
     States {
         staking_state: StakingState,
         alchemy_state: AlchemyState,
+        transmute_state: TransmuteState,
         crating_state: DisplayCrateState,
     },
     /// displays the code hashes and addresses of used contracts
@@ -348,6 +455,8 @@ pub enum QueryAnswer {
         skulls_contract: ContractInfo,
         /// crate contracts
         crate_contracts: Vec<ContractInfo>,
+        /// potion contracts
+        potion_contracts: Vec<ContractInfo>,
     },
     /// displays the ingredients
     Ingredients { ingredients: Vec<String> },
@@ -382,9 +491,87 @@ pub enum QueryAnswer {
         category_name: String,
         /// category index specified in the query
         category_idx: u8,
+        /// number of variants in this category
+        count: u8,
         /// variants of this category
         variants: Vec<VariantIdxName>,
     },
+    /// displays the trait variants with dependencies (multiple layers)
+    Dependencies {
+        /// number of dependencies
+        count: u16,
+        dependencies: Vec<Dependencies>,
+    },
+    /// display the keywords for generating potion names
+    NameKeywords {
+        /// keywords for the first position
+        first: Vec<String>,
+        /// keywords for the second position
+        second: Vec<String>,
+        /// keywords for the third position
+        third: Vec<String>,
+        /// keywords for the fourth position
+        fourth: Vec<String>,
+    },
+    /// displays the potion rules
+    PotionRules {
+        // number of rules
+        count: u16,
+        // rules
+        potion_rules: Vec<DisplayPotionRules>,
+    },
+}
+
+/// potion definition
+#[derive(Serialize, Deserialize, JsonSchema, Clone, PartialEq, Eq, Debug)]
+pub struct PotionStats {
+    /// randomization weight table for normal skulls
+    pub normal_weights: Vec<TraitWeight>,
+    /// randomization weight table for jawless
+    pub jawless_weights: Vec<TraitWeight>,
+    /// randomization weight table for cyclops
+    pub cyclops_weights: Vec<TraitWeight>,
+    /// the weights to roll the effects of other potions
+    pub potion_weights: Vec<PotionWeight>,
+    /// skull must have one of the listed traits
+    pub required_traits: Vec<VariantList>,
+    /// true if this potion rolls a None into non-None
+    pub is_addition_potion: bool,
+    /// true if all potions in potion_weights should be applied
+    pub do_all_listed_potions: bool,
+    /// true if this potion changes the color but keeps style of a trait
+    pub dye_style: bool,
+    /// true if this potion can only be used if the skull has a jaw
+    pub jaw_only: bool,
+}
+
+/// displayable rules of potion effects
+#[derive(Serialize, Deserialize, JsonSchema, Clone, PartialEq, Eq, Debug)]
+pub struct DisplayPotionRules {
+    /// index of this potion
+    pub potion_idx: u16,
+    /// randomization weight table for normal skulls
+    pub normal_weights: Vec<TraitWeight>,
+    /// randomization weight table for jawless
+    pub jawless_weights: Vec<TraitWeight>,
+    /// randomization weight table for cyclops
+    pub cyclops_weights: Vec<TraitWeight>,
+    /// the weights to roll the effects of other potions
+    pub potion_weights: Vec<PotionWeight>,
+    /// skull must have one of the listed traits
+    pub required_traits: Vec<VariantList>,
+    /// true if this potion rolls a None into non-None
+    pub is_addition_potion: bool,
+    /// true if all potions in potion_weights should be applied
+    pub do_all_listed_potions: bool,
+    /// true if this potion changes the color but keeps style of a trait
+    pub dye_style: bool,
+    /// true if this potion is disabled
+    pub is_disabled: bool,
+    /// true if this potion can only be used if the skull has a jaw
+    pub jaw_only: bool,
+    /// true if the recipe has been generated
+    pub has_recipe: bool,
 }
 
 /// the address and viewing key making an authenticated query request
@@ -443,28 +630,6 @@ pub struct IngredientQty {
     pub quantity: u32,
 }
 
-/// info about staking state
-#[derive(Serialize, Deserialize, JsonSchema, Clone, PartialEq, Eq, Debug)]
-pub struct StakingState {
-    /// true if staking is halted
-    pub halt: bool,
-    /// skull category index
-    pub skull_idx: u8,
-    /// cooldown period
-    pub cooldown: u64,
-}
-
-/// info about alchemy state
-#[derive(Serialize, Deserialize, JsonSchema, Clone, PartialEq, Eq, Debug)]
-pub struct AlchemyState {
-    /// true if alchemy is halted
-    pub halt: bool,
-    /// StoredLayerId for cyclops
-    pub cyclops: StoredLayerId,
-    /// StoredLayerId for jawless
-    pub jawless: StoredLayerId,
-}
-
 /// displayable info about crating state
 #[derive(Serialize, Deserialize, JsonSchema, Clone, PartialEq, Eq, Debug)]
 pub struct DisplayCrateState {
@@ -483,12 +648,126 @@ pub struct LayerId {
     pub variant: String,
 }
 
-/// identifies a layer by indices
+impl LayerId {
+    /// Returns StdResult<StoredLayerId> from creating a StoredLayerId from a LayerId
+    ///
+    /// # Arguments
+    ///
+    /// * `storage` - a reference to the contract storage
+    /// * `cats` - category names
+    /// * `vars` - variant names
+    pub fn to_stored(
+        &self,
+        storage: &dyn Storage,
+        cats: &[String],
+        vars: &mut [Vec<String>],
+    ) -> StdResult<StoredLayerId> {
+        let category = cats
+            .iter()
+            .position(|c| *c == self.category)
+            .ok_or_else(|| StdError::generic_err(format!("Category {} not found", self.category)))?
+            as u8;
+        // if haven't converted from this category yet
+        let these_vars = vars.get_mut(category as usize).unwrap();
+        if these_vars.is_empty() {
+            let var_store = ReadonlyPrefixedStorage::new(storage, PREFIX_VARIANTS);
+            *these_vars =
+                may_load::<Vec<String>>(&var_store, &category.to_le_bytes())?.unwrap_or_default();
+        }
+
+        Ok(StoredLayerId {
+            category,
+            variant: these_vars
+                .iter()
+                .position(|v| *v == self.variant)
+                .ok_or_else(|| {
+                    StdError::generic_err(format!("Variant {} not found", self.variant))
+                })? as u8,
+        })
+    }
+}
+
+/// layer id and rolling weight
 #[derive(Serialize, Deserialize, JsonSchema, Clone, PartialEq, Eq, Debug)]
-pub struct StoredLayerId {
-    /// the layer category
-    pub category: u8,
-    pub variant: u8,
+pub struct TraitWeight {
+    /// layer id
+    pub layer: LayerId,
+    /// rolling weight for this trait
+    pub weight: u16,
+}
+
+impl TraitWeight {
+    /// Returns StdResult<StoredTraitWeight> from creating a StoredTraitWeight from a TraitWeight
+    ///
+    /// # Arguments
+    ///
+    /// * `storage` - a reference to the contract storage
+    /// * `cats` - category names
+    /// * `vars` - variant names
+    pub fn to_stored(
+        &self,
+        storage: &dyn Storage,
+        cats: &[String],
+        vars: &mut [Vec<String>],
+    ) -> StdResult<StoredTraitWeight> {
+        Ok(StoredTraitWeight {
+            layer: self.layer.to_stored(storage, cats, vars)?,
+            weight: self.weight,
+        })
+    }
+}
+
+/// list of variants grouped by category
+#[derive(Serialize, Deserialize, JsonSchema, Clone, PartialEq, Eq, Debug)]
+pub struct VariantList {
+    /// category
+    pub category: String,
+    /// list of variants in this category
+    pub variants: Vec<String>,
+}
+
+impl VariantList {
+    /// Returns StdResult<StoredVariantList> from creating a StoredVariantList from a VariantList
+    ///
+    /// # Arguments
+    ///
+    /// * `storage` - a reference to the contract storage
+    /// * `cats` - category names
+    /// * `vars` - variant names
+    pub fn to_stored(
+        &self,
+        storage: &dyn Storage,
+        cats: &[String],
+        vars: &mut [Vec<String>],
+    ) -> StdResult<StoredVariantList> {
+        let cat = cats
+            .iter()
+            .position(|c| *c == self.category)
+            .ok_or_else(|| StdError::generic_err(format!("Category {} not found", self.category)))?
+            as u8;
+        // if haven't converted from this category yet
+        let these_vars = vars.get_mut(cat as usize).unwrap();
+        if these_vars.is_empty() {
+            let var_store = ReadonlyPrefixedStorage::new(storage, PREFIX_VARIANTS);
+            *these_vars =
+                may_load::<Vec<String>>(&var_store, &cat.to_le_bytes())?.unwrap_or_default();
+        }
+
+        Ok(StoredVariantList {
+            cat,
+            vars: self
+                .variants
+                .iter()
+                .map(|v| {
+                    these_vars
+                        .iter()
+                        .position(|listed| *v == *listed)
+                        .ok_or_else(|| StdError::generic_err(format!("Variant {} not found", v)))
+                        .map(|u| u as u8)
+                })
+                .collect::<StdResult<Vec<u8>>>()?,
+        })
+    }
 }
 
 /// first time staking bonus eligibility for a token
@@ -509,4 +788,31 @@ pub struct VariantIdxName {
     pub idx: u8,
     /// name of the variant
     pub name: String,
+}
+
+/// describes a trait that has multiple layers
+#[derive(Serialize, Deserialize, JsonSchema, Clone, PartialEq, Eq, Debug)]
+pub struct Dependencies {
+    /// id of the layer variant that has dependencies
+    pub id: LayerId,
+    /// the other layers that are correlated to this variant
+    pub correlated: Vec<LayerId>,
+}
+
+/// a potion index and its rolling weight
+#[derive(Serialize, Deserialize, JsonSchema, Clone, PartialEq, Eq, Debug)]
+pub struct PotionWeight {
+    /// index of the potion
+    pub idx: u16,
+    /// rolling weight
+    pub weight: u16,
+}
+
+impl Weighted for PotionWeight {
+    /// Returns u16
+    ///
+    /// returns the weight of this potion
+    fn weight(&self) -> u16 {
+        self.weight
+    }
 }

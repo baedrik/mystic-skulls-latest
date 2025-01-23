@@ -188,6 +188,93 @@
       "additionalProperties": false
     },
     {
+      "description": "retrieve dependencies and skipped categories from the svg server",
+      "type": "object",
+      "required": [
+        "get_dependencies"
+      ],
+      "properties": {
+        "get_dependencies": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "disable potions",
+      "type": "object",
+      "required": [
+        "disable_potions"
+      ],
+      "properties": {
+        "disable_potions": {
+          "type": "object",
+          "properties": {
+            "by_index": {
+              "description": "optional list of potion indices to disable",
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0.0
+              }
+            },
+            "by_name": {
+              "description": "optional list of potion names to disable",
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "enable potions",
+      "type": "object",
+      "required": [
+        "enable_potions"
+      ],
+      "properties": {
+        "enable_potions": {
+          "type": "object",
+          "properties": {
+            "by_index": {
+              "description": "optional list of potion indices to enable",
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0.0
+              }
+            },
+            "by_name": {
+              "description": "optional list of potion names to enable",
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
       "description": "add ingredients",
       "type": "object",
       "required": [
@@ -204,6 +291,80 @@
               "type": "array",
               "items": {
                 "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "add potion name keywords",
+      "type": "object",
+      "required": [
+        "add_name_keywords"
+      ],
+      "properties": {
+        "add_name_keywords": {
+          "type": "object",
+          "required": [
+            "first",
+            "fourth",
+            "second",
+            "third"
+          ],
+          "properties": {
+            "first": {
+              "description": "keywords for the first position",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "fourth": {
+              "description": "keywords for the fourth position",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "second": {
+              "description": "keywords for the second position",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "third": {
+              "description": "keywords for the third position",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "add potion definitions",
+      "type": "object",
+      "required": [
+        "define_potions"
+      ],
+      "properties": {
+        "define_potions": {
+          "type": "object",
+          "required": [
+            "potion_definitions"
+          ],
+          "properties": {
+            "potion_definitions": {
+              "description": "new potions",
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/PotionStats"
               }
             }
           }
@@ -331,6 +492,17 @@
           "properties": {
             "crate_contract": {
               "description": "optional crating contract (can either update the code hash of an existing one or add a new one)",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/ContractInfo"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "potion_contract": {
+              "description": "optional potion contract (can either update the code hash of an existing one or add a new one)",
               "anyOf": [
                 {
                   "$ref": "#/definitions/ContractInfo"
@@ -618,6 +790,24 @@
         }
       }
     },
+    "LayerId": {
+      "description": "identifies a layer",
+      "type": "object",
+      "required": [
+        "category",
+        "variant"
+      ],
+      "properties": {
+        "category": {
+          "description": "the layer category name",
+          "type": "string"
+        },
+        "variant": {
+          "description": "the variant name",
+          "type": "string"
+        }
+      }
+    },
     "Metadata": {
       "description": "token metadata",
       "type": "object",
@@ -632,6 +822,96 @@
               "$ref": "#/definitions/Extension"
             }
           ]
+        }
+      }
+    },
+    "PotionStats": {
+      "description": "potion definition",
+      "type": "object",
+      "required": [
+        "cyclops_weights",
+        "do_all_listed_potions",
+        "dye_style",
+        "is_addition_potion",
+        "jaw_only",
+        "jawless_weights",
+        "normal_weights",
+        "potion_weights",
+        "required_traits"
+      ],
+      "properties": {
+        "cyclops_weights": {
+          "description": "randomization weight table for cyclops",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/TraitWeight"
+          }
+        },
+        "do_all_listed_potions": {
+          "description": "true if all potions in potion_weights should be applied",
+          "type": "boolean"
+        },
+        "dye_style": {
+          "description": "true if this potion changes the color but keeps style of a trait",
+          "type": "boolean"
+        },
+        "is_addition_potion": {
+          "description": "true if this potion rolls a None into non-None",
+          "type": "boolean"
+        },
+        "jaw_only": {
+          "description": "true if this potion can only be used if the skull has a jaw",
+          "type": "boolean"
+        },
+        "jawless_weights": {
+          "description": "randomization weight table for jawless",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/TraitWeight"
+          }
+        },
+        "normal_weights": {
+          "description": "randomization weight table for normal skulls",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/TraitWeight"
+          }
+        },
+        "potion_weights": {
+          "description": "the weights to roll the effects of other potions",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PotionWeight"
+          }
+        },
+        "required_traits": {
+          "description": "skull must have one of the listed traits",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/VariantList"
+          }
+        }
+      }
+    },
+    "PotionWeight": {
+      "description": "a potion index and its rolling weight",
+      "type": "object",
+      "required": [
+        "idx",
+        "weight"
+      ],
+      "properties": {
+        "idx": {
+          "description": "index of the potion",
+          "type": "integer",
+          "format": "uint16",
+          "minimum": 0.0
+        },
+        "weight": {
+          "description": "rolling weight",
+          "type": "integer",
+          "format": "uint16",
+          "minimum": 0.0
         }
       }
     },
@@ -671,6 +951,51 @@
         "value": {
           "description": "trait value",
           "type": "string"
+        }
+      }
+    },
+    "TraitWeight": {
+      "description": "layer id and rolling weight",
+      "type": "object",
+      "required": [
+        "layer",
+        "weight"
+      ],
+      "properties": {
+        "layer": {
+          "description": "layer id",
+          "allOf": [
+            {
+              "$ref": "#/definitions/LayerId"
+            }
+          ]
+        },
+        "weight": {
+          "description": "rolling weight for this trait",
+          "type": "integer",
+          "format": "uint16",
+          "minimum": 0.0
+        }
+      }
+    },
+    "VariantList": {
+      "description": "list of variants grouped by category",
+      "type": "object",
+      "required": [
+        "category",
+        "variants"
+      ],
+      "properties": {
+        "category": {
+          "description": "category",
+          "type": "string"
+        },
+        "variants": {
+          "description": "list of variants in this category",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       }
     }

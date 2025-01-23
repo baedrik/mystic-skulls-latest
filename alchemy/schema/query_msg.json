@@ -17,13 +17,50 @@
       "additionalProperties": false
     },
     {
-      "description": "displays the staking, crating, and alchemy states",
+      "description": "displays the staking, crating, transmute, and alchemy states",
       "type": "object",
       "required": [
         "states"
       ],
       "properties": {
         "states": {
+          "type": "object",
+          "properties": {
+            "permit": {
+              "description": "optional permit used to verify admin identity.  If both viewer and permit are provided, the viewer will be ignored",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Permit_for_TokenPermissions"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "viewer": {
+              "description": "optional address and viewing key of an admin",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/ViewerInfo"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "displays the keywords used to generate potion names",
+      "type": "object",
+      "required": [
+        "name_keywords"
+      ],
+      "properties": {
+        "name_keywords": {
           "type": "object",
           "properties": {
             "permit": {
@@ -367,6 +404,61 @@
       "additionalProperties": false
     },
     {
+      "description": "displays the potion rules",
+      "type": "object",
+      "required": [
+        "potion_rules"
+      ],
+      "properties": {
+        "potion_rules": {
+          "type": "object",
+          "properties": {
+            "page": {
+              "description": "optional page number to display.  Defaults to 0 (first page) if not provided",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint16",
+              "minimum": 0.0
+            },
+            "page_size": {
+              "description": "optional limit to the number of potions to show.  Defaults to 5 if not specified",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint16",
+              "minimum": 0.0
+            },
+            "permit": {
+              "description": "optional permit used to verify admin identity.  If both viewer and permit are provided, the viewer will be ignored",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Permit_for_TokenPermissions"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "viewer": {
+              "description": "optional address and viewing key of an admin",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/ViewerInfo"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
       "description": "displays the staking table for a specified skull material",
       "type": "object",
       "required": [
@@ -449,6 +541,61 @@
             },
             "page_size": {
               "description": "optional limit to the number of layer names to show.  Defaults to 30 if not specified",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint16",
+              "minimum": 0.0
+            },
+            "permit": {
+              "description": "optional permit used to verify admin identity.  If both viewer and permit are provided, the viewer will be ignored",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Permit_for_TokenPermissions"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "viewer": {
+              "description": "optional address and viewing key of an admin",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/ViewerInfo"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "displays the trait variants with dependencies (multiple layers)",
+      "type": "object",
+      "required": [
+        "dependencies"
+      ],
+      "properties": {
+        "dependencies": {
+          "type": "object",
+          "properties": {
+            "page": {
+              "description": "optional page number to display.  Defaults to 0 (first page) if not provided",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint16",
+              "minimum": 0.0
+            },
+            "page_size": {
+              "description": "optional limit to the number of dependencies to show.  Defaults to 30 if not specified",
               "type": [
                 "integer",
                 "null"

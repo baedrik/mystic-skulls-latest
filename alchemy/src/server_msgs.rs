@@ -1,5 +1,7 @@
 use crate::contract::BLOCK_SIZE;
-use crate::msg::{LayerId, StoredLayerId, VariantIdxName, ViewerInfo};
+use crate::msg::{Dependencies, LayerId, VariantIdxName, ViewerInfo};
+use crate::state::StoredLayerId;
+use cosmwasm_std::{StdResult, Storage};
 use secret_toolkit::utils::Query;
 use serde::{Deserialize, Serialize};
 
@@ -27,6 +29,11 @@ pub enum ServerQueryMsg {
         viewer: ViewerInfo,
         /// index of the category to display
         idx: u8,
+    },
+    /// display the dependencies and skipped categories
+    ServeAlchemy {
+        /// address and viewing key of the alchemy contract
+        viewer: ViewerInfo,
     },
 }
 
@@ -81,4 +88,53 @@ pub struct Transmute {
 #[derive(Deserialize)]
 pub struct TransmuteWrapper {
     pub transmute: Transmute,
+}
+
+/// dependencies and skipped categories
+#[derive(Deserialize)]
+pub struct ServeAlchemyResponse {
+    /// categories that are skipped when rolling
+    pub skip: Vec<u8>,
+    /// variant display dependencies
+    pub dependencies: Vec<StoredDependencies>,
+}
+
+/// wrapper to deserialize ServeAlchemy responses
+#[derive(Deserialize)]
+pub struct ServeAlchemyWrapper {
+    pub serve_alchemy: ServeAlchemyResponse,
+}
+
+/// describes a trait that has multiple layers
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct StoredDependencies {
+    /// id of the layer variant that has dependencies
+    pub id: StoredLayerId,
+    /// the other layers that are correlated to this variant
+    pub correlated: Vec<StoredLayerId>,
+}
+
+impl StoredDependencies {
+    /// Returns StdResult<Dependencies> from creating a Dependencies from a StoredDependencies
+    ///
+    /// # Arguments
+    ///
+    /// * `storage` - a reference to the contract storage
+    /// * `cats` - category names
+    /// * `vars` - variant names
+    pub fn to_display(
+        &self,
+        storage: &dyn Storage,
+        cats: &[String],
+        vars: &mut [Vec<String>],
+    ) -> StdResult<Dependencies> {
+        Ok(Dependencies {
+            id: self.id.to_display(storage, cats, vars)?,
+            correlated: self
+                .correlated
+                .iter()
+                .map(|s| s.to_display(storage, cats, vars))
+                .collect::<StdResult<Vec<LayerId>>>()?,
+        })
+    }
 }

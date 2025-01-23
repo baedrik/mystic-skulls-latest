@@ -7,6 +7,7 @@
     "charge_time",
     "crate_contract",
     "entropy",
+    "potion_contract",
     "skulls_contract",
     "svg_server"
   ],
@@ -38,6 +39,14 @@
     "entropy": {
       "description": "entropy used for prng seed",
       "type": "string"
+    },
+    "potion_contract": {
+      "description": "code hash and address of a potion contract",
+      "allOf": [
+        {
+          "$ref": "#/definitions/ContractInfo"
+        }
+      ]
     },
     "skulls_contract": {
       "description": "code hash and address of the skulls contract",

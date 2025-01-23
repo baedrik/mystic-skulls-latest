@@ -1,9 +1,10 @@
 use base64::{engine::general_purpose, Engine as _};
 use rand_core::RngCore;
+use serde::Deserialize;
 
 use cosmwasm_std::{
-    entry_point, to_binary, Addr, Api, Binary, CanonicalAddr, CosmosMsg, Deps, DepsMut, Empty, Env,
-    MessageInfo, Response, StdError, StdResult, Storage, Uint128,
+    entry_point, from_binary, to_binary, Addr, Api, Binary, CanonicalAddr, CosmosMsg, Deps,
+    DepsMut, Empty, Env, MessageInfo, Response, StdError, StdResult, Storage, Uint128,
 };
 use cosmwasm_storage::{PrefixedStorage, ReadonlyPrefixedStorage};
 use std::cmp::min;
@@ -17,21 +18,27 @@ use secret_toolkit::{
 
 use crate::contract_info::{ContractInfo, StoreContractInfo};
 use crate::msg::{
-    AlchemyState, ChargeInfo, DisplayCrateState, EligibilityInfo, ExecuteAnswer, ExecuteMsg,
-    IngrSetWeight, IngredientQty, IngredientSet, InstantiateMsg, QueryAnswer, QueryMsg,
-    StakingState, StakingTable, StoredLayerId, VariantIdxName, ViewerInfo,
+    ChargeInfo, Dependencies, DisplayCrateState, DisplayPotionRules, EligibilityInfo,
+    ExecuteAnswer, ExecuteMsg, IngrSetWeight, IngredientQty, IngredientSet, InstantiateMsg,
+    PotionStats, PotionWeight, QueryAnswer, QueryMsg, StakingTable, TraitWeight, VariantIdxName,
+    VariantList, ViewerInfo,
 };
-use crate::server_msgs::{LayerNamesWrapper, ServerQueryMsg};
+use crate::server_msgs::{
+    LayerNamesWrapper, ServeAlchemyWrapper, ServerQueryMsg, StoredDependencies,
+};
 use crate::snip721::{
-    BatchNftDossierWrapper, Burn, ImageInfo, ImageInfoWrapper, Metadata, Snip721HandleMsg,
-    Snip721QueryMsg, Trait,
+    BatchNftDossierWrapper, Burn, ImageInfo, ImageInfoWrapper, Metadata, NftInfoWrapper,
+    Snip721HandleMsg, Snip721QueryMsg, Trait,
 };
 use crate::state::{
-    CrateState, SkullStakeInfo, StoredIngrSet, StoredSetWeight, ADMINS_KEY, ALCHEMY_STATE_KEY,
-    CATEGORIES_KEY, CRATES_KEY, CRATE_META_KEY, CRATE_STATE_KEY, INGREDIENTS_KEY, INGRED_SETS_KEY,
-    MATERIALS_KEY, MY_VIEWING_KEY, PREFIX_REVOKED_PERMITS, PREFIX_SKULL_STAKE,
-    PREFIX_STAKING_TABLE, PREFIX_USER_INGR_INVENTORY, PREFIX_USER_STAKE, PREFIX_VARIANTS,
-    SKULL_721_KEY, STAKING_STATE_KEY, SVG_SERVER_KEY,
+    AlchemyState, CrateState, SkullStakeInfo, StakingState, StoredIngrSet, StoredLayerId,
+    StoredPotionRules, StoredSetWeight, StoredTraitWeight, StoredVariantList, TransmuteState,
+    Weighted, ADMINS_KEY, ALCHEMY_STATE_KEY, CATEGORIES_KEY, CRATES_KEY, CRATE_META_KEY,
+    CRATE_STATE_KEY, DEPENDENCIES_KEY, INGREDIENTS_KEY, INGRED_SETS_KEY, MATERIALS_KEY,
+    MY_VIEWING_KEY, NAME_KEYWORD_KEY, POTION_721_KEY, PREFIX_NAME_2_POTION_IDX,
+    PREFIX_POTION_IDX_2_RECIPE, PREFIX_POTION_RULES, PREFIX_RECIPES_BY_LEN, PREFIX_REVOKED_PERMITS,
+    PREFIX_SKULL_STAKE, PREFIX_STAKING_TABLE, PREFIX_USER_INGR_INVENTORY, PREFIX_USER_STAKE,
+    PREFIX_VARIANTS, SKULL_721_KEY, STAKING_STATE_KEY, SVG_SERVER_KEY, TRANSMUTE_STATE_KEY,
 };
 use crate::storage::{load, may_load, save};
 
@@ -103,6 +110,16 @@ pub fn instantiate(
     };
     let mut crates = vec![crate_raw];
     save(deps.storage, CRATES_KEY, &crates)?;
+    let potion_addr = deps
+        .api
+        .addr_validate(&msg.potion_contract.address)
+        .and_then(|a| deps.api.addr_canonicalize(a.as_str()))?;
+    let potion_raw = StoreContractInfo {
+        address: potion_addr,
+        code_hash: msg.potion_contract.code_hash,
+    };
+    let mut potions721 = vec![potion_raw];
+    save(deps.storage, POTION_721_KEY, &potions721)?;
     let stk_st = StakingState {
         halt: true,
         skull_idx: 2,
@@ -111,6 +128,15 @@ pub fn instantiate(
     save(deps.storage, STAKING_STATE_KEY, &stk_st)?;
     let alc_st = AlchemyState {
         halt: true,
+        potion_cnt: 0,
+        found_cnt: 0,
+        disabled: Vec::new(),
+    };
+    save(deps.storage, ALCHEMY_STATE_KEY, &alc_st)?;
+    let trn_st = TransmuteState {
+        skip: Vec::new(),
+        nones: Vec::new(),
+        jaw_only: Vec::new(),
         cyclops: StoredLayerId {
             category: 5,
             variant: 1,
@@ -119,8 +145,9 @@ pub fn instantiate(
             category: 3,
             variant: 0,
         },
+        skull_idx: 2,
     };
-    save(deps.storage, ALCHEMY_STATE_KEY, &alc_st)?;
+    save(deps.storage, TRANSMUTE_STATE_KEY, &trn_st)?;
     let crate_st = CrateState { halt: true, cnt: 0 };
     save(deps.storage, CRATE_STATE_KEY, &crate_st)?;
     let messages = vec![
@@ -135,12 +162,21 @@ pub fn instantiate(
             None,
         )?,
         Snip721HandleMsg::RegisterReceiveNft {
-            code_hash: env.contract.code_hash,
+            code_hash: env.contract.code_hash.clone(),
             also_implements_batch_receive_nft: true,
         }
         .to_cosmos_msg(
             crates.swap_remove(0).code_hash,
             msg.crate_contract.address,
+            None,
+        )?,
+        Snip721HandleMsg::RegisterReceiveNft {
+            code_hash: env.contract.code_hash,
+            also_implements_batch_receive_nft: true,
+        }
+        .to_cosmos_msg(
+            potions721.swap_remove(0).code_hash,
+            msg.potion_contract.address,
             None,
         )?,
     ];
@@ -162,6 +198,21 @@ pub fn execute(deps: DepsMut, env: Env, info: MessageInfo, msg: ExecuteMsg) -> S
     let response = match msg {
         ExecuteMsg::CreateViewingKey { entropy } => try_create_key(deps, &env, &info, &entropy),
         ExecuteMsg::SetViewingKey { key, .. } => try_set_key(deps, &info.sender, key),
+        ExecuteMsg::DisablePotions { by_name, by_index } => {
+            try_toggle_potions(deps, &info.sender, by_name, by_index, true)
+        }
+        ExecuteMsg::EnablePotions { by_name, by_index } => {
+            try_toggle_potions(deps, &info.sender, by_name, by_index, false)
+        }
+        ExecuteMsg::DefinePotions { potion_definitions } => {
+            try_define_potions(deps, &env, &info.sender, potion_definitions)
+        }
+        ExecuteMsg::AddNameKeywords {
+            first,
+            second,
+            third,
+            fourth,
+        } => try_add_keywords(deps, &info.sender, first, second, third, fourth),
         ExecuteMsg::AddAdmins { admins } => {
             try_process_auth_list(deps, &info.sender, &admins, true)
         }
@@ -169,6 +220,7 @@ pub fn execute(deps: DepsMut, env: Env, info: MessageInfo, msg: ExecuteMsg) -> S
             try_process_auth_list(deps, &info.sender, &admins, false)
         }
         ExecuteMsg::GetLayerNames { idx } => try_get_names(deps, &info.sender, env, idx),
+        ExecuteMsg::GetDependencies {} => try_get_deps(deps, &info.sender, env),
         ExecuteMsg::AddIngredients { ingredients } => {
             try_add_ingredients(deps, &info.sender, ingredients)
         }
@@ -194,12 +246,14 @@ pub fn execute(deps: DepsMut, env: Env, info: MessageInfo, msg: ExecuteMsg) -> S
             svg_server,
             skulls_contract,
             crate_contract,
+            potion_contract,
         } => try_set_contracts(
             deps,
             &info.sender,
             svg_server,
             skulls_contract,
             crate_contract,
+            potion_contract,
             env.contract.code_hash,
         ),
         ExecuteMsg::BatchReceiveNft {
@@ -335,7 +389,7 @@ fn try_claim_stake(deps: DepsMut, env: Env, sender: &Addr) -> StdResult<Response
     if old_list.is_empty() {
         return Err(StdError::generic_err("You are not staking any skulls"));
     }
-    let (id_images, _) = verify_ownership(
+    let (id_images, _, _) = verify_ownership(
         deps.as_ref(),
         sender.as_str(),
         old_list,
@@ -429,7 +483,7 @@ fn try_set_stake(
         return Err(StdError::generic_err("You can only stake up to 5 skulls"));
     }
     // check if sender owns all the skulls they are trying to stake
-    let (id_images, not_owned) = verify_ownership(
+    let (id_images, not_owned, _) = verify_ownership(
         deps.as_ref(),
         sender.as_str(),
         token_ids,
@@ -528,31 +582,262 @@ fn try_set_stake(
 /// * `msg` - the base64 encoded msg containing the skull to apply the potion to (if applicable)
 fn try_batch_receive(
     deps: DepsMut,
-    _env: Env,
+    env: Env,
     sender: Addr,
     from: &str,
     token_ids: Vec<String>,
-    _msg: Option<Binary>,
+    msg: Option<Binary>,
 ) -> StdResult<Response> {
-    let mut raw_crates: Vec<StoreContractInfo> = load(deps.storage, CRATES_KEY)?;
+    let mut raw_ptn721: Vec<StoreContractInfo> = load(deps.storage, POTION_721_KEY)?;
     let sender_raw = deps.api.addr_canonicalize(sender.as_str())?;
-    if let Some(pos) = raw_crates.iter().position(|c| c.address == sender_raw) {
-        let crt_state: CrateState = load(deps.storage, CRATE_STATE_KEY)?;
-        if crt_state.halt {
-            return Err(StdError::generic_err("Uncrating has been halted"));
+    if let Some(pos) = raw_ptn721.iter().position(|c| c.address == sender_raw) {
+        let alc_st: AlchemyState = load(deps.storage, ALCHEMY_STATE_KEY)?;
+        if alc_st.halt {
+            return Err(StdError::generic_err("Alchemy has been halted"));
         }
-        uncrate(
+        rcv_potion(
             deps,
+            env,
             sender.into_string(),
-            raw_crates.swap_remove(pos).code_hash,
+            raw_ptn721.swap_remove(pos).code_hash,
             from,
             token_ids,
+            msg,
+            &alc_st.disabled,
         )
     } else {
-        Err(StdError::generic_err(
-            "This may only be called by crate or potion contracts",
-        ))
+        let mut raw_crates: Vec<StoreContractInfo> = load(deps.storage, CRATES_KEY)?;
+        if let Some(pos) = raw_crates.iter().position(|c| c.address == sender_raw) {
+            let crt_state: CrateState = load(deps.storage, CRATE_STATE_KEY)?;
+            if crt_state.halt {
+                return Err(StdError::generic_err("Uncrating has been halted"));
+            }
+            uncrate(
+                deps,
+                sender.into_string(),
+                raw_crates.swap_remove(pos).code_hash,
+                from,
+                token_ids,
+            )
+        } else {
+            Err(StdError::generic_err(
+                "This may only be called by crate or potion contracts",
+            ))
+        }
     }
+}
+
+/// Returns StdResult<Response>
+///
+/// add potion naming keywords
+///
+/// # Arguments
+///
+/// * `deps` - a mutable reference to Extern containing all the contract's external dependencies
+/// * `sender` - a reference to the message sender
+/// * `first` - words to add to the first position
+/// * `second` - words to add to the second position
+/// * `third` - words to add to the third position
+/// * `fourth` - words to add to the fourth position
+fn try_add_keywords(
+    deps: DepsMut,
+    sender: &Addr,
+    first: Vec<String>,
+    second: Vec<String>,
+    third: Vec<String>,
+    fourth: Vec<String>,
+) -> StdResult<Response> {
+    // only allow admins to do this
+    check_admin_tx(deps.as_ref(), sender)?;
+
+    let bundled = vec![first, second, third, fourth];
+    let mut keywords = may_load::<Vec<Vec<String>>>(deps.storage, NAME_KEYWORD_KEY)?
+        .unwrap_or(vec![Vec::new(); 4]);
+
+    for (i, list) in bundled.into_iter().enumerate() {
+        let keylist = keywords
+            .get_mut(i)
+            .ok_or_else(|| StdError::generic_err("Can't happen with what's coded above"))?;
+        for word in list.into_iter() {
+            if !keylist.contains(&word) {
+                keylist.push(word);
+            }
+        }
+    }
+    save(deps.storage, NAME_KEYWORD_KEY, &keywords)?;
+
+    Ok(
+        Response::new().set_data(to_binary(&ExecuteAnswer::AddNameKeywords {
+            fourth: keywords.pop().unwrap(),
+            third: keywords.pop().unwrap(),
+            second: keywords.pop().unwrap(),
+            first: keywords.pop().unwrap(),
+        })?),
+    )
+}
+
+/// Returns StdResult<Response>
+///
+/// define new potions
+///
+/// # Arguments
+///
+/// * `deps` - a mutable reference to Extern containing all the contract's external dependencies
+/// * `env` - a reference to the Env of contract's environment
+/// * `sender` - a reference to the message sender
+/// * `potion_definitions` - list of potion definitions
+fn try_define_potions(
+    deps: DepsMut,
+    env: &Env,
+    sender: &Addr,
+    potion_definitions: Vec<PotionStats>,
+) -> StdResult<Response> {
+    // only allow admins to do this
+    check_admin_tx(deps.as_ref(), sender)?;
+
+    let mut alc_st: AlchemyState = load(deps.storage, ALCHEMY_STATE_KEY)?;
+    let mut trn_st: TransmuteState = load(deps.storage, TRANSMUTE_STATE_KEY)?;
+    let mut prng = ContractPrng::from_env(env);
+    let keywords =
+        may_load::<Vec<Vec<String>>>(deps.storage, NAME_KEYWORD_KEY)?.ok_or_else(|| {
+            StdError::generic_err("Keywords for potion name generation has not been added yet")
+        })?;
+    let word_cnts = keywords
+        .iter()
+        .map(|l| l.len() as u64)
+        .collect::<Vec<u64>>();
+    let cats = may_load::<Vec<String>>(deps.storage, CATEGORIES_KEY)?.unwrap_or_default();
+    let cat_cnt = cats.len();
+    let mut vars = vec![Vec::new(); cat_cnt];
+    let old_ptn_cnt = alc_st.potion_cnt;
+
+    for potion in potion_definitions.into_iter() {
+        // generate a unique encoded potion name
+        let mut idx_store = PrefixedStorage::new(deps.storage, PREFIX_NAME_2_POTION_IDX);
+        let mut encoded: Vec<u8> = Vec::new();
+        let mut not_unique = true;
+        while not_unique {
+            encoded = Vec::new();
+            for cnt in word_cnts.iter() {
+                encoded.push((prng.next_u64() % *cnt) as u8);
+            }
+            not_unique = may_load::<u16>(&idx_store, encoded.as_slice())?.is_some();
+        }
+        save(&mut idx_store, encoded.as_slice(), &alc_st.potion_cnt)?;
+        let rule = StoredPotionRules {
+            normal_weights: potion
+                .normal_weights
+                .iter()
+                .map(|w| w.to_stored(deps.storage, &cats, &mut vars))
+                .collect::<StdResult<Vec<StoredTraitWeight>>>()?,
+            jawless_weights: potion
+                .jawless_weights
+                .iter()
+                .map(|w| w.to_stored(deps.storage, &cats, &mut vars))
+                .collect::<StdResult<Vec<StoredTraitWeight>>>()?,
+            cyclops_weights: potion
+                .cyclops_weights
+                .iter()
+                .map(|w| w.to_stored(deps.storage, &cats, &mut vars))
+                .collect::<StdResult<Vec<StoredTraitWeight>>>()?,
+            potion_weights: potion.potion_weights,
+            required: potion
+                .required_traits
+                .iter()
+                .map(|t| t.to_stored(deps.storage, &cats, &mut vars))
+                .collect::<StdResult<Vec<StoredVariantList>>>()?,
+            is_add: potion.is_addition_potion,
+            do_all: potion.do_all_listed_potions,
+            dye_style: potion.dye_style,
+        };
+        // shouldn't ever be possible to already have this idx in jaw_only, but in case some
+        // later code migration has a buggy side effect...
+        if potion.jaw_only && !trn_st.jaw_only.contains(&alc_st.potion_cnt) {
+            trn_st.jaw_only.push(alc_st.potion_cnt);
+        }
+        let mut rul_store = PrefixedStorage::new(deps.storage, PREFIX_POTION_RULES);
+        save(&mut rul_store, &alc_st.potion_cnt.to_le_bytes(), &rule)?;
+        alc_st.potion_cnt = alc_st.potion_cnt.checked_add(1).ok_or_else(|| {
+            StdError::generic_err("Reached implementation limit for potion definition")
+        })?;
+    }
+
+    save(deps.storage, ALCHEMY_STATE_KEY, &alc_st)?;
+    save(deps.storage, TRANSMUTE_STATE_KEY, &trn_st)?;
+
+    Ok(
+        Response::new().set_data(to_binary(&ExecuteAnswer::DefinePotions {
+            potions_added: alc_st.potion_cnt - old_ptn_cnt,
+            potion_count: alc_st.potion_cnt,
+        })?),
+    )
+}
+
+/// Returns StdResult<Response>
+///
+/// disable/enable potions
+///
+/// # Arguments
+///
+/// * `deps` - a mutable reference to Extern containing all the contract's external dependencies
+/// * `sender` - a reference to the message sender
+/// * `by_name` - optional list of potion names to set
+/// * `by_index` - optional list of potion indices to set
+/// * `turn_off` - true if the potions are being disabled
+fn try_toggle_potions(
+    deps: DepsMut,
+    sender: &Addr,
+    by_name: Option<Vec<String>>,
+    by_index: Option<Vec<u16>>,
+    turn_off: bool,
+) -> StdResult<Response> {
+    // only allow admins to do this
+    check_admin_tx(deps.as_ref(), sender)?;
+
+    let names = by_name.unwrap_or_default();
+    let mut indices = by_index.unwrap_or_default();
+    let mut alc_st: AlchemyState = load(deps.storage, ALCHEMY_STATE_KEY)?;
+    let idx_store = ReadonlyPrefixedStorage::new(deps.storage, PREFIX_NAME_2_POTION_IDX);
+    // convert the names into indices and combine the lists
+    let mut keywords = Vec::new();
+    let mut converted = names
+        .iter()
+        .map(|n| {
+            encode_name(deps.storage, n, &mut keywords)
+                .and_then(|code| may_load::<u16>(&idx_store, code.as_slice()))
+                .and_then(|o| {
+                    o.ok_or_else(|| StdError::generic_err(format!("Unknown potion name {}", n)))
+                })
+        })
+        .collect::<StdResult<Vec<u16>>>()?;
+    indices.append(&mut converted);
+
+    if turn_off {
+        // disabling
+        for ptn in indices.iter() {
+            if *ptn >= alc_st.potion_cnt {
+                return Err(StdError::generic_err(format!(
+                    "{} is not a valid potion index",
+                    ptn
+                )));
+            }
+            // add the potion to the disabled list if it's not already there
+            if !alc_st.disabled.contains(ptn) {
+                alc_st.disabled.push(*ptn);
+            }
+        }
+    } else {
+        // enabling
+        alc_st.disabled.retain(|p| !indices.contains(p));
+    }
+    // save the disabled list
+    save(deps.storage, ALCHEMY_STATE_KEY, &alc_st)?;
+
+    Ok(
+        Response::new().set_data(to_binary(&ExecuteAnswer::DisabledPotions {
+            disabled_potions: alc_st.disabled,
+        })?),
+    )
 }
 
 /// Returns StdResult<Response>
@@ -567,6 +852,8 @@ fn try_batch_receive(
 /// * `new_skulls_contract` - optional code hash and address of the skulls contract
 /// * `new_crate_contract` - optional code hash and address of a crating contract (can either update the code
 ///                     hash of an existing one or add a new one)
+/// * `new_potion_contract` - optional code hash and address of a potion contract (can either update the code
+///                     hash of an existing one or add a new one)
 /// * `code_hash` - code hash of this contract
 fn try_set_contracts(
     deps: DepsMut,
@@ -574,6 +861,7 @@ fn try_set_contracts(
     new_svg_server: Option<ContractInfo>,
     new_skulls_contract: Option<ContractInfo>,
     new_crate_contract: Option<ContractInfo>,
+    new_potion_contract: Option<ContractInfo>,
     code_hash: String,
 ) -> StdResult<Response> {
     // only allow admins to do this
@@ -621,13 +909,29 @@ fn try_set_contracts(
         save(deps.storage, CRATES_KEY, &raw_crates)?;
         messages.push(
             Snip721HandleMsg::RegisterReceiveNft {
-                code_hash,
+                code_hash: code_hash.clone(),
                 also_implements_batch_receive_nft: true,
             }
             .to_cosmos_msg(crt.code_hash, crt.address, None)?,
         );
     }
-
+    let mut raw_potions: Vec<StoreContractInfo> = load(deps.storage, POTION_721_KEY)?;
+    if let Some(ptn) = new_potion_contract {
+        let raw = ptn.get_store(deps.api)?;
+        if let Some(old) = raw_potions.iter_mut().find(|c| c.address == raw.address) {
+            old.code_hash = raw.code_hash;
+        } else {
+            raw_potions.push(raw);
+        }
+        save(deps.storage, POTION_721_KEY, &raw_potions)?;
+        messages.push(
+            Snip721HandleMsg::RegisterReceiveNft {
+                code_hash,
+                also_implements_batch_receive_nft: true,
+            }
+            .to_cosmos_msg(ptn.code_hash, ptn.address, None)?,
+        );
+    }
     let mut resp = Response::new();
     if !messages.is_empty() {
         resp = resp.add_messages(messages);
@@ -636,6 +940,10 @@ fn try_set_contracts(
         svg_server,
         skulls_contract,
         crate_contracts: raw_crates
+            .into_iter()
+            .map(|s| s.into_humanized(deps.api))
+            .collect::<StdResult<Vec<ContractInfo>>>()?,
+        potion_contracts: raw_potions
             .into_iter()
             .map(|s| s.into_humanized(deps.api))
             .collect::<StdResult<Vec<ContractInfo>>>()?,
@@ -920,6 +1228,57 @@ fn try_add_ingredients(
 
 /// Returns StdResult<Response>
 ///
+/// get dependencies and skipped categories form the svg server
+///
+/// # Arguments
+///
+/// * `deps` - a mutable reference to Extern containing all the contract's external dependencies
+/// * `sender` - a reference to the message sender
+/// * `env` - Env of contract's environment
+fn try_get_deps(deps: DepsMut, sender: &Addr, env: Env) -> StdResult<Response> {
+    // only allow admins to do this
+    check_admin_tx(deps.as_ref(), sender)?;
+    let svg_server = load::<StoreContractInfo>(deps.storage, SVG_SERVER_KEY)
+        .and_then(|s| s.into_humanized(deps.api))?;
+    let viewing_key: String = load(deps.storage, MY_VIEWING_KEY)?;
+    let viewer = ViewerInfo {
+        address: env.contract.address.into_string(),
+        viewing_key,
+    };
+    // get the dependencies and the skips
+    let srv_alc = ServerQueryMsg::ServeAlchemy { viewer }
+        .query::<_, ServeAlchemyWrapper>(deps.querier, svg_server.code_hash, svg_server.address)?
+        .serve_alchemy;
+    save(deps.storage, DEPENDENCIES_KEY, &srv_alc.dependencies)?;
+
+    let mut trn_st: TransmuteState = load(deps.storage, TRANSMUTE_STATE_KEY)?;
+    let categories = may_load::<Vec<String>>(deps.storage, CATEGORIES_KEY)?.unwrap_or_default();
+    let cat_cnt = categories.len() as u8;
+    let var_store = ReadonlyPrefixedStorage::new(deps.storage, PREFIX_VARIANTS);
+    trn_st.nones = Vec::new();
+    for i in 0..cat_cnt {
+        let var_names = may_load::<Vec<String>>(&var_store, &i.to_le_bytes())?.unwrap_or_default();
+        // find the none index
+        let none_idx = if let Some(pos) = var_names.iter().position(|v| v == "None") {
+            pos as u8
+        } else {
+            255u8
+        };
+        trn_st.nones.push(none_idx);
+    }
+    trn_st.skip = srv_alc.skip;
+    save(deps.storage, TRANSMUTE_STATE_KEY, &trn_st)?;
+
+    Ok(
+        Response::new().set_data(to_binary(&ExecuteAnswer::GetDependencies {
+            skip: trn_st.skip,
+            nones: trn_st.nones,
+        })?),
+    )
+}
+
+/// Returns StdResult<Response>
+///
 /// get category and variant names and indices of a specified category from the svg server
 ///
 /// # Arguments
@@ -959,6 +1318,9 @@ fn try_get_names(deps: DepsMut, sender: &Addr, env: Env, idx: u8) -> StdResult<R
         let mut stk_st: StakingState = load(deps.storage, STAKING_STATE_KEY)?;
         stk_st.skull_idx = lyr_nm.category_idx;
         save(deps.storage, STAKING_STATE_KEY, &stk_st)?;
+        let mut trn_st: TransmuteState = load(deps.storage, TRANSMUTE_STATE_KEY)?;
+        trn_st.skull_idx = stk_st.skull_idx;
+        save(deps.storage, TRANSMUTE_STATE_KEY, &trn_st)?;
         materials.resize_with(var_cnt, String::new);
         is_skull = true;
     } else if lyr_nm.category_name == *"Eye Type" {
@@ -968,20 +1330,20 @@ fn try_get_names(deps: DepsMut, sender: &Addr, env: Env, idx: u8) -> StdResult<R
     }
     // if doing eye or jaw type
     if is_eye_type || is_jaw {
-        let mut alc_st: AlchemyState = load(deps.storage, ALCHEMY_STATE_KEY)?;
+        let mut trn_st: TransmuteState = load(deps.storage, TRANSMUTE_STATE_KEY)?;
         let (var_name, err_msg, layer) = if is_eye_type {
             // cyclops layer
             (
                 "Eye Type.Cyclops",
                 "No variant named Eye Type.Cyclops",
-                &mut alc_st.cyclops,
+                &mut trn_st.cyclops,
             )
         } else {
             // jawless layer
             (
                 "None",
                 "Missing None variant for Jaw Type",
-                &mut alc_st.jawless,
+                &mut trn_st.jawless,
             )
         };
         layer.category = lyr_nm.category_idx;
@@ -991,7 +1353,7 @@ fn try_get_names(deps: DepsMut, sender: &Addr, env: Env, idx: u8) -> StdResult<R
             .find(|v| v.name == var_name)
             .ok_or_else(|| StdError::generic_err(err_msg))?
             .idx;
-        save(deps.storage, ALCHEMY_STATE_KEY, &alc_st)?;
+        save(deps.storage, TRANSMUTE_STATE_KEY, &trn_st)?;
     }
     let mut variants: Vec<String> = vec![String::new(); var_cnt];
     for idx_name in lyr_nm.variants.iter() {
@@ -1106,6 +1468,9 @@ pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
         QueryMsg::Admins { viewer, permit } => {
             query_admins(deps, viewer, permit, &env.contract.address)
         }
+        QueryMsg::NameKeywords { viewer, permit } => {
+            query_keywords(deps, viewer, permit, &env.contract.address)
+        }
         QueryMsg::HaltStatuses {} => query_halt(deps.storage),
         QueryMsg::Contracts {} => query_contracts(deps),
         QueryMsg::MyStaking { viewer, permit } => query_my_stake(deps, env, viewer, permit),
@@ -1158,11 +1523,146 @@ pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
             page_size,
             &env.contract.address,
         ),
+        QueryMsg::Dependencies {
+            viewer,
+            permit,
+            page,
+            page_size,
+        } => query_deps(deps, viewer, permit, page, page_size, &env.contract.address),
+        QueryMsg::PotionRules {
+            viewer,
+            permit,
+            page,
+            page_size,
+        } => query_rules(deps, viewer, permit, page, page_size, &env.contract.address),
         QueryMsg::States { viewer, permit } => {
             query_state(deps, viewer, permit, &env.contract.address)
         }
     };
     pad_query_result(response, BLOCK_SIZE)
+}
+
+/// Returns StdResult<Binary> displaying the potion rules
+///
+/// # Arguments
+///
+/// * `deps` - reference to Extern containing all the contract's external dependencies
+/// * `viewer` - optional address and key making an authenticated query request
+/// * `permit` - optional permit with "owner" permission
+/// * `page` - optional page to display
+/// * `page_size` - optional number of rules to display
+/// * `my_addr` - a reference to this contract's address
+fn query_rules(
+    deps: Deps,
+    viewer: Option<ViewerInfo>,
+    permit: Option<Permit>,
+    page: Option<u16>,
+    page_size: Option<u16>,
+    my_addr: &Addr,
+) -> StdResult<Binary> {
+    // only allow admins to do this
+    check_admin_query(deps, viewer, permit, my_addr)?;
+
+    let alc_st: AlchemyState = load(deps.storage, ALCHEMY_STATE_KEY)?;
+    let trn_st: TransmuteState = load(deps.storage, TRANSMUTE_STATE_KEY)?;
+    let page = page.unwrap_or(0);
+    let limit = page_size.unwrap_or(5);
+    let start = page * limit;
+    let end = min(start + limit, alc_st.potion_cnt);
+    let categories = may_load::<Vec<String>>(deps.storage, CATEGORIES_KEY)?.unwrap_or_default();
+    let cat_cnt = categories.len();
+    let mut vars = vec![Vec::new(); cat_cnt];
+    let rul_store = ReadonlyPrefixedStorage::new(deps.storage, PREFIX_POTION_RULES);
+    let p2r_store = ReadonlyPrefixedStorage::new(deps.storage, PREFIX_POTION_IDX_2_RECIPE);
+    let mut potion_rules = Vec::new();
+
+    for idx in start..end {
+        let is_disabled = alc_st.disabled.contains(&idx);
+        let ptn_key = idx.to_le_bytes();
+        if let Some(rules) = may_load::<StoredPotionRules>(&rul_store, &ptn_key)? {
+            // check if a recipe was generated
+            let has_recipe = may_load::<Vec<u8>>(&p2r_store, &ptn_key)?.is_some();
+
+            potion_rules.push(DisplayPotionRules {
+                potion_idx: idx,
+                normal_weights: rules
+                    .normal_weights
+                    .iter()
+                    .map(|w| w.to_display(deps.storage, &categories, &mut vars))
+                    .collect::<StdResult<Vec<TraitWeight>>>()?,
+                jawless_weights: rules
+                    .jawless_weights
+                    .iter()
+                    .map(|w| w.to_display(deps.storage, &categories, &mut vars))
+                    .collect::<StdResult<Vec<TraitWeight>>>()?,
+                cyclops_weights: rules
+                    .cyclops_weights
+                    .iter()
+                    .map(|w| w.to_display(deps.storage, &categories, &mut vars))
+                    .collect::<StdResult<Vec<TraitWeight>>>()?,
+                potion_weights: rules.potion_weights,
+                required_traits: rules
+                    .required
+                    .iter()
+                    .map(|l| l.to_display(deps.storage, &categories, &mut vars))
+                    .collect::<StdResult<Vec<VariantList>>>()?,
+                is_addition_potion: rules.is_add,
+                do_all_listed_potions: rules.do_all,
+                dye_style: rules.dye_style,
+                is_disabled,
+                jaw_only: trn_st.jaw_only.contains(&idx),
+                has_recipe,
+            });
+        }
+    }
+
+    to_binary(&QueryAnswer::PotionRules {
+        count: alc_st.potion_cnt,
+        potion_rules,
+    })
+}
+
+/// Returns StdResult<Binary> displaying the dependencies
+///
+/// # Arguments
+///
+/// * `deps` - reference to Extern containing all the contract's external dependencies
+/// * `viewer` - optional address and key making an authenticated query request
+/// * `permit` - optional permit with "owner" permission
+/// * `page` - optional page to display
+/// * `page_size` - optional number of dependencies to display
+/// * `my_addr` - a reference to this contract's address
+fn query_deps(
+    deps: Deps,
+    viewer: Option<ViewerInfo>,
+    permit: Option<Permit>,
+    page: Option<u16>,
+    page_size: Option<u16>,
+    my_addr: &Addr,
+) -> StdResult<Binary> {
+    // only allow admins to do this
+    check_admin_query(deps, viewer, permit, my_addr)?;
+
+    let page = page.unwrap_or(0) as usize;
+    let limit = page_size.unwrap_or(30) as usize;
+    let skip = page * limit;
+    let categories = may_load::<Vec<String>>(deps.storage, CATEGORIES_KEY)?.unwrap_or_default();
+    let cat_cnt = categories.len();
+    let mut vars = vec![Vec::new(); cat_cnt];
+
+    let depends =
+        may_load::<Vec<StoredDependencies>>(deps.storage, DEPENDENCIES_KEY)?.unwrap_or_default();
+    let count = depends.len() as u16;
+
+    to_binary(&QueryAnswer::Dependencies {
+        count,
+        dependencies: depends
+            .iter()
+            .skip(skip)
+            .take(limit)
+            .map(|s| s.to_display(deps.storage, &categories, &mut vars))
+            .collect::<StdResult<Vec<Dependencies>>>()?,
+    })
 }
 
 /// Returns StdResult<Binary> displaying the layer names of the specified category
@@ -1174,7 +1674,7 @@ pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
 /// * `permit` - optional permit with "owner" permission
 /// * `idx` - index of the category to display
 /// * `page` - optional page to display
-/// * `page_size` - optional number of sets to display
+/// * `page_size` - optional number of layer names to display
 /// * `my_addr` - a reference to this contract's address
 fn query_layers(
     deps: Deps,
@@ -1203,10 +1703,12 @@ fn query_layers(
 
     let var_store = ReadonlyPrefixedStorage::new(deps.storage, PREFIX_VARIANTS);
     let var_names = may_load::<Vec<String>>(&var_store, &idx.to_le_bytes())?.unwrap_or_default();
+    let count = var_names.len() as u8;
 
     to_binary(&QueryAnswer::LayerNames {
         category_name: categories.swap_remove(idx_big),
         category_idx: idx,
+        count,
         variants: var_names
             .into_iter()
             .enumerate()
@@ -1254,11 +1756,18 @@ fn query_contracts(deps: Deps) -> StdResult<Binary> {
                 .map(|s| s.into_humanized(deps.api))
                 .collect::<StdResult<Vec<ContractInfo>>>()
         })?;
+    let potion_contracts =
+        load::<Vec<StoreContractInfo>>(deps.storage, POTION_721_KEY).and_then(|v| {
+            v.into_iter()
+                .map(|s| s.into_humanized(deps.api))
+                .collect::<StdResult<Vec<ContractInfo>>>()
+        })?;
 
     to_binary(&QueryAnswer::Contracts {
         svg_server,
         skulls_contract,
         crate_contracts,
+        potion_contracts,
     })
 }
 
@@ -1425,7 +1934,7 @@ fn query_token_bonus(
     let mut token_eligibility: Vec<EligibilityInfo> = Vec::new();
     if user_is_eligible {
         let skull_store = ReadonlyPrefixedStorage::new(deps.storage, PREFIX_SKULL_STAKE);
-        let (_, not_owned) = verify_ownership(
+        let (_, not_owned, _) = verify_ownership(
             deps,
             &user_hmn,
             token_ids.clone(),
@@ -1488,7 +1997,7 @@ fn query_my_stake(
     let id_images = if stk_state.halt {
         Vec::new()
     } else {
-        let (idi, _) = verify_ownership(
+        let (idi, _, _) = verify_ownership(
             deps,
             &user_hmn,
             stk_list,
@@ -1591,14 +2100,44 @@ fn query_state(
     let staking_state: StakingState = load(deps.storage, STAKING_STATE_KEY)?;
     let alchemy_state: AlchemyState = load(deps.storage, ALCHEMY_STATE_KEY)?;
     let crt_st: CrateState = load(deps.storage, CRATE_STATE_KEY)?;
+    let transmute_state: TransmuteState = load(deps.storage, TRANSMUTE_STATE_KEY)?;
 
     to_binary(&QueryAnswer::States {
         staking_state,
         alchemy_state,
+        transmute_state,
         crating_state: DisplayCrateState {
             halt: crt_st.halt,
             cnt: Uint128::new(crt_st.cnt),
         },
+    })
+}
+
+/// Returns StdResult<Binary> displaying the keywords used to generate potion names
+///
+/// # Arguments
+///
+/// * `deps` - reference to Extern containing all the contract's external dependencies
+/// * `viewer` - optional address and key making an authenticated query request
+/// * `permit` - optional permit with "owner" permission
+/// * `my_addr` - a reference to this contract's address
+fn query_keywords(
+    deps: Deps,
+    viewer: Option<ViewerInfo>,
+    permit: Option<Permit>,
+    my_addr: &Addr,
+) -> StdResult<Binary> {
+    // only allow admins to do this
+    check_admin_query(deps, viewer, permit, my_addr)?;
+
+    let mut keywords = may_load::<Vec<Vec<String>>>(deps.storage, NAME_KEYWORD_KEY)?
+        .unwrap_or(vec![Vec::new(); 4]);
+
+    to_binary(&QueryAnswer::NameKeywords {
+        fourth: keywords.pop().unwrap(),
+        third: keywords.pop().unwrap(),
+        second: keywords.pop().unwrap(),
+        first: keywords.pop().unwrap(),
     })
 }
 
@@ -1819,11 +2358,11 @@ pub struct IdImage {
     pub image: ImageInfo,
 }
 
-/// Returns StdResult<(Vec<IdImage>, Vec<String>)>
+/// Returns StdResult<(Vec<IdImage>, Vec<String>, ContractInfo)>
 ///
 /// Verifies ownership of a list of skull token ids and returns the list of token ids and image infos for
 /// skulls that have been verified to be owned by the specified address, and the list of token ids of the
-/// skulls that do not belong to the address
+/// skulls that do not belong to the address.  Also returns the skull 721 contract
 ///
 /// # Arguments
 ///
@@ -1836,7 +2375,7 @@ fn verify_ownership(
     owner: &str,
     skulls: Vec<String>,
     my_addr: String,
-) -> StdResult<(Vec<IdImage>, Vec<String>)> {
+) -> StdResult<(Vec<IdImage>, Vec<String>, ContractInfo)> {
     let mut owned: Vec<IdImage> = Vec::new();
     let mut not_owned: Vec<String> = Vec::new();
     let viewing_key: String = load(deps.storage, MY_VIEWING_KEY)?;
@@ -1876,7 +2415,7 @@ fn verify_ownership(
             });
         }
     }
-    Ok((owned, not_owned))
+    Ok((owned, not_owned, skull_contract))
 }
 
 /// Returns StdResult<Vec<u32>>
@@ -2070,7 +2609,10 @@ fn uncrate(
     .batch_nft_dossier
     .nft_dossiers;
     // burn all the crates sent
-    let burns = vec![Burn { token_ids }];
+    let burns = vec![Burn {
+        token_ids,
+        memo: None,
+    }];
     let mut resp = Response::new().add_message(
         Snip721HandleMsg::BatchBurnNft { burns }.to_cosmos_msg(crate_hash, crate_addr, None)?,
     );
@@ -2092,12 +2634,516 @@ fn uncrate(
             }
         }
     }
-    // create logs for each inredient added
+    // create logs for each ingredient added
     for (i, qty) in added.iter().enumerate() {
         resp = resp.add_attribute(ingredients[i].clone(), qty.to_string());
     }
     save(&mut inv_store, user_key, &raw_inv)?;
     Ok(resp)
+}
+
+/// Returns StdResult<Response>
+///
+/// attempt to apply a potion
+///
+/// # Arguments
+///
+/// * `deps` - mutable reference to Extern containing all the contract's external dependencies
+/// * `env` - Env of contract's environment
+/// * `ptn721_addr` - the message sender's address
+/// * `ptn721_hash` - the message sender's code hash
+/// * `from` - a reference to the address that owned the potion NFT
+/// * `token_ids` - list of tokens sent
+/// * `msg` - the base64 encoded msg containing the skull to apply the potion to (if applicable)
+/// * `disabled` - list of potions that are disabled
+fn rcv_potion(
+    deps: DepsMut,
+    env: Env,
+    ptn721_addr: String,
+    ptn721_hash: String,
+    from: &str,
+    mut token_ids: Vec<String>,
+    msg: Option<Binary>,
+    disabled: &[u16],
+) -> StdResult<Response> {
+    let pot_id = token_ids
+        .pop()
+        .ok_or_else(|| StdError::generic_err("No potion NFT was sent"))?;
+    let skull_id: String =
+        from_binary(&msg.ok_or_else(|| StdError::generic_err("Skull ID was not provided"))?)?;
+    let distill = &skull_id == "distill";
+    let trn_st: TransmuteState = load(deps.storage, TRANSMUTE_STATE_KEY)?;
+    // get the name of the potion
+    let pot_name = Snip721QueryMsg::NftInfo {
+        token_id: pot_id.clone(),
+    }
+    .query::<_, NftInfoWrapper>(deps.querier, ptn721_hash.clone(), ptn721_addr.clone())?
+    .nft_info
+    .extension
+    .name
+    .ok_or_else(|| StdError::generic_err("Potion NFT is missing the potion name"))?;
+    let idx_store = ReadonlyPrefixedStorage::new(deps.storage, PREFIX_NAME_2_POTION_IDX);
+    let encode_ptn = encode_name(deps.storage, &pot_name, &mut Vec::new())?;
+    let pot_idx = may_load::<u16>(&idx_store, encode_ptn.as_slice())?
+        .ok_or_else(|| StdError::generic_err(format!("Unknown potion name {}", pot_name)))?;
+    let is_disabled = disabled.contains(&pot_idx);
+    let mut messages: Vec<CosmosMsg> = Vec::new();
+    let memo: Option<String>;
+    let changed_str: String;
+    let mut added_inv: Vec<u32>;
+    let ingredients: Vec<String>;
+
+    if distill {
+        // distill a disabled potion
+        if !is_disabled {
+            return Err(StdError::generic_err(
+                "This potion has not been disabled, you can not distill it",
+            ));
+        }
+        let p2r_store = ReadonlyPrefixedStorage::new(deps.storage, PREFIX_POTION_IDX_2_RECIPE);
+        let recipe = may_load::<Vec<u8>>(&p2r_store, &pot_idx.to_le_bytes())?.ok_or_else(|| {
+            StdError::generic_err("The recipe for this potion has not been generated")
+        })?;
+        let user_raw = deps
+            .api
+            .addr_validate(from)
+            .and_then(|a| deps.api.addr_canonicalize(a.as_str()))?;
+        let user_key = user_raw.as_slice();
+        // get list of ingredients
+        ingredients = may_load::<Vec<String>>(deps.storage, INGREDIENTS_KEY)?.unwrap_or_default();
+        let ingr_cnt = ingredients.len();
+        // get user's inventory
+        let mut inv_store = PrefixedStorage::new(deps.storage, PREFIX_USER_INGR_INVENTORY);
+        let mut raw_inv: Vec<u32> = may_load(&inv_store, user_key)?.unwrap_or_default();
+        // just in case new ingredients get added, extend old inventories
+        raw_inv.resize(ingr_cnt, 0);
+        added_inv = vec![0; ingr_cnt];
+        // increment the recipe ingredients
+        for i in recipe.into_iter() {
+            let big_i = i as usize;
+            raw_inv[big_i] += 1;
+            added_inv[big_i] += 1;
+        }
+        save(&mut inv_store, user_key, &raw_inv)?;
+        memo = Some("Distilled for ingredients".to_string());
+        changed_str = String::new();
+    } else {
+        if is_disabled {
+            return Err(StdError::generic_err(
+                "This potion has been disabled, but the ingredients may be distilled",
+            ));
+        }
+        // check if sender owns the skull they are trying to transmute
+        let (mut id_images, _, skull_contract) = verify_ownership(
+            deps.as_ref(),
+            from,
+            vec![skull_id],
+            env.contract.address.to_string(),
+        )?;
+        let mut id_image = if let Some(idi) = id_images.pop() {
+            idi
+        } else {
+            return Err(StdError::generic_err(
+                "You do not own the skull you are trying to transmute",
+            ));
+        };
+        // can only apply potions to completely revealed skulls
+        if id_image.image.current.iter().any(|u| *u == 255) {
+            return Err(StdError::generic_err(
+                "Potions can only be applied to completely revealed skulls",
+            ));
+        }
+        // save the starting appearance
+        let old_image = id_image.image.current.clone();
+        let mut prng = ContractPrng::from_env(&env);
+        let mut potions = vec![pot_idx];
+        let depends = may_load::<Vec<StoredDependencies>>(deps.storage, DEPENDENCIES_KEY)?
+            .unwrap_or_default();
+        let is_jawless = old_image[trn_st.jawless.category as usize] == trn_st.jawless.variant;
+        let is_cyclops = old_image[trn_st.cyclops.category as usize] == trn_st.cyclops.variant;
+
+        // keep applying until we are done with all potions
+        while !potions.is_empty() {
+            apply_potion(
+                deps.storage,
+                &mut prng,
+                &mut id_image.image.current,
+                &trn_st,
+                &depends,
+                &mut potions,
+                is_jawless,
+                is_cyclops,
+                disabled,
+            )?;
+        }
+
+        // check if the skull image changed
+        if old_image == id_image.image.current {
+            return Err(StdError::generic_err("The skull resisted transmutation"));
+        }
+        // change to transmuted background if this is the first transmutation
+        if id_image.image.current[0] < 6 {
+            let var_store = ReadonlyPrefixedStorage::new(deps.storage, PREFIX_VARIANTS);
+            let backgrs =
+                may_load::<Vec<String>>(&var_store, &0u8.to_le_bytes())?.unwrap_or_default();
+            let new_back = format!("{} Transmuted", backgrs[id_image.image.current[0] as usize]);
+            let new_idx = backgrs.iter().position(|b| *b == new_back).ok_or_else(|| {
+                StdError::generic_err(format!(
+                    "Unable to find corresponding transmuted background {}",
+                    new_back
+                ))
+            })?;
+            id_image.image.current[0] = new_idx as u8;
+        }
+        // get categories that have changed
+        let categories = may_load::<Vec<String>>(deps.storage, CATEGORIES_KEY)?.unwrap_or_default();
+        let changed = categories
+            .into_iter()
+            .enumerate()
+            .filter_map(|(i, c)| {
+                if (old_image[i] != id_image.image.current[i]) && !trn_st.skip.contains(&(i as u8))
+                {
+                    Some(c)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<String>>();
+        changed_str = format!("{:?}", changed);
+        // rewind save point
+        id_image.image.previous = old_image;
+        memo = Some(format!("{} applied to skull {}", pot_name, id_image.id));
+        added_inv = Vec::new();
+        ingredients = Vec::new();
+        // update the skull image
+        messages.push(
+            Snip721HandleMsg::SetImageInfo {
+                token_id: id_image.id,
+                image_info: id_image.image,
+            }
+            .to_cosmos_msg(skull_contract.code_hash, skull_contract.address, None)?,
+        );
+    }
+    // burn the potion
+    messages.push(
+        Snip721HandleMsg::BatchBurnNft {
+            burns: vec![Burn {
+                token_ids: vec![pot_id],
+                memo,
+            }],
+        }
+        .to_cosmos_msg(ptn721_hash, ptn721_addr, None)?,
+    );
+    let mut resp = Response::new().add_messages(messages);
+    if !distill {
+        // applied a potion
+        // create log of categories changed
+        resp = resp.add_attribute("Transmuted Categories", changed_str);
+    } else {
+        // distilled a potion
+        // create logs for each ingredient added
+        for (i, qty) in added_inv.iter().enumerate() {
+            resp = resp.add_attribute(ingredients[i].clone(), qty.to_string());
+        }
+    }
+    Ok(resp)
+}
+
+/// Returns StdResult<()>
+///
+/// apply a potion to a skull's image
+///
+/// # Arguments
+///
+/// * `storage` - a reference to this contract's storage
+/// * `prng` - a mutable reference to the ContractPrng used to draw random selections
+/// * `image` - a mutable reference to the current skull image vec
+/// * `trn_st` - a reference to the TransmuteState
+/// * `depends` - list of traits that have multiple layers
+/// * `potions` - a mutable reference to a list of potions being applied
+/// * `is_jawless` - true if the skull is jawless
+/// * `is_cyclops` - true if the skull is a cyclops
+/// * `disabled` - list of potions that are disabled
+fn apply_potion(
+    storage: &dyn Storage,
+    prng: &mut ContractPrng,
+    image: &mut [u8],
+    trn_st: &TransmuteState,
+    depends: &[StoredDependencies],
+    potions: &mut Vec<u16>,
+    is_jawless: bool,
+    is_cyclops: bool,
+    disabled: &[u16],
+) -> StdResult<()> {
+    let ptn_idx = potions
+        .pop()
+        .ok_or_else(|| StdError::generic_err("Empty potions index array"))?;
+    let rul_store = ReadonlyPrefixedStorage::new(storage, PREFIX_POTION_RULES);
+    let mut rules: StoredPotionRules = load(&rul_store, &ptn_idx.to_le_bytes())?;
+    if rules.is_add {
+        // if this is the addition potion, only draw from category potions where this skull has a None
+        rules.potion_weights = rules
+            .potion_weights
+            .into_iter()
+            .filter_map(|p| {
+                let cat_idx = p.weight as usize;
+                if image[cat_idx] == trn_st.nones[cat_idx] {
+                    Some(PotionWeight {
+                        idx: p.idx,
+                        weight: 1,
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<PotionWeight>>();
+        if rules.potion_weights.is_empty() {
+            return Err(StdError::generic_err(
+                "This skull does not have any Nones that can be transmuted",
+            ));
+        }
+    }
+    if !rules.potion_weights.is_empty() {
+        // filter out disabled potions and jaw-only potions if jawless
+        rules.potion_weights.retain(|p| {
+            !disabled.contains(&p.idx) && (!is_jawless || !trn_st.jaw_only.contains(&p.idx))
+        });
+        if rules.potion_weights.is_empty() {
+            return Err(StdError::generic_err(
+                "This skull can not be affected by this potion",
+            ));
+        }
+    }
+    if is_jawless && trn_st.jaw_only.contains(&ptn_idx) {
+        return Err(StdError::generic_err(
+            "This potion can not be used on jawless skulls",
+        ));
+    }
+    if !rules.required.is_empty()
+        && !rules
+            .required
+            .iter()
+            .any(|l| l.vars.contains(&image[l.cat as usize]))
+    {
+        return Err(StdError::generic_err(
+            "This skull does not have any of the required traits for this potion",
+        ));
+    }
+    if rules.do_all {
+        // perform multiple potion effects
+        potions.append(
+            &mut rules
+                .potion_weights
+                .into_iter()
+                .map(|w| w.idx)
+                .collect::<Vec<u16>>(),
+        );
+        return Ok(());
+    }
+    if rules.potion_weights.is_empty() {
+        // will roll from trait weights
+        let roll_tbl = if is_jawless && !rules.jawless_weights.is_empty() {
+            &mut rules.jawless_weights
+        } else if is_cyclops && !rules.cyclops_weights.is_empty() {
+            &mut rules.cyclops_weights
+        } else {
+            &mut rules.normal_weights
+        };
+        // if changing the color of a style, create the weight table
+        if rules.dye_style {
+            let var_store = ReadonlyPrefixedStorage::new(storage, PREFIX_VARIANTS);
+            // dye style potions always have a required list and always are for one category
+            let cat_idx = rules.required[0].cat;
+            let vars =
+                may_load::<Vec<String>>(&var_store, &cat_idx.to_le_bytes())?.unwrap_or_default();
+            let cur_var = image[cat_idx as usize] as usize;
+            // split out the color of the style
+            let (common, _) = vars[cur_var].rsplit_once(' ').ok_or_else(|| {
+                StdError::generic_err("Can not find space delimited color in variant name")
+            })?;
+            *roll_tbl = vars
+                .iter()
+                .enumerate()
+                .filter_map(|(i, n)| {
+                    // create a weight for all variants that have the same style but do not include the current color
+                    if i != cur_var && n.starts_with(common) {
+                        Some(StoredTraitWeight {
+                            layer: StoredLayerId {
+                                category: cat_idx,
+                                variant: i as u8,
+                            },
+                            weight: 1,
+                        })
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<StoredTraitWeight>>();
+        } else {
+            // if not creating the weight table, need to remove the traits this skull already has
+            roll_tbl.retain(|t| t.layer.variant != image[t.layer.category as usize]);
+        }
+        if !roll_tbl.is_empty() {
+            let winner = draw_winner::<StoredTraitWeight>(prng, roll_tbl);
+            transmute_trait(storage, winner.layer, image, depends, trn_st)?;
+        }
+        // allowing an empty roll table to fall through in case some potions of a do all won't have an effect
+        // but still want the others to work
+    } else {
+        let winner = draw_winner::<PotionWeight>(prng, &mut rules.potion_weights);
+        potions.push(winner.idx);
+    }
+
+    Ok(())
+}
+
+/// Returns T
+///
+/// select a winner from a weight table
+///
+/// # Arguments
+///
+/// * `prng` - a mutable reference to the ContractPrng used to draw random selections
+/// * `table` - weighted table slice
+fn draw_winner<T: Weighted>(prng: &mut ContractPrng, table: &mut Vec<T>) -> T {
+    let mut total_weight: u16 = 0;
+    for t in table.iter() {
+        total_weight += t.weight();
+    }
+    // randomly pick the winner
+    let rdm = prng.next_u64();
+    let winning_num: u16 = (rdm % total_weight as u64) as u16;
+    let mut tally = 0u16;
+    let mut winner = 0usize;
+    for (i, t) in table.iter().enumerate() {
+        // if the sum didn't panic on overflow, it can't happen here
+        tally += t.weight();
+        if tally > winning_num {
+            winner = i;
+            break;
+        }
+    }
+    table.swap_remove(winner)
+}
+
+/// Returns StdResult<()>
+///
+/// give a skull a new trait, clearing out old dependencies and setting new ones
+///
+/// # Arguments
+///
+/// * `storage` - a reference to this contract's storage
+/// * `new_trait` - category and variant of the new trait the skull should acquire
+/// * `image` - a mutable reference to the current image array
+/// * `depends` - list of traits that have multiple layers
+/// * `trn_st` - a reference to the TransmuteState
+fn transmute_trait(
+    storage: &dyn Storage,
+    new_trait: StoredLayerId,
+    image: &mut [u8],
+    depends: &[StoredDependencies],
+    trn_st: &TransmuteState,
+) -> StdResult<()> {
+    // don't do anything if no change
+    let old_var = image[new_trait.category as usize];
+    if old_var != new_trait.variant {
+        // check if the old trait had dependencies
+        let old_lyr = StoredLayerId {
+            category: new_trait.category,
+            variant: old_var,
+        };
+        if let Some(old_dep) = depends.iter().find(|d| d.id == old_lyr) {
+            for dep_lyr in old_dep.correlated.iter() {
+                let big_cat = dep_lyr.category as usize;
+                // set the dependency to None
+                image[big_cat] = trn_st.nones[big_cat];
+            }
+        }
+        // set the new trait
+        image[new_trait.category as usize] = new_trait.variant;
+        // also change the jaw if the skull material changed
+        let big_jaw = trn_st.jawless.category as usize;
+        if new_trait.category == trn_st.skull_idx && image[big_jaw] != trn_st.jawless.variant {
+            let var_store = ReadonlyPrefixedStorage::new(storage, PREFIX_VARIANTS);
+            let skulls = may_load::<Vec<String>>(&var_store, &trn_st.skull_idx.to_le_bytes())?
+                .unwrap_or_default();
+            let jaws = may_load::<Vec<String>>(&var_store, &trn_st.jawless.category.to_le_bytes())?
+                .unwrap_or_default();
+            image[big_jaw] = jaws
+                .iter()
+                .position(|j| *j == skulls[image[trn_st.skull_idx as usize] as usize])
+                .ok_or_else(|| {
+                    StdError::generic_err("Jaw variant name does not match skull variant name")
+                })? as u8;
+        }
+        // check if the new trait has dependencies
+        if let Some(new_dep) = depends.iter().find(|d| d.id == new_trait) {
+            for dep_lyr in new_dep.correlated.iter() {
+                image[dep_lyr.category as usize] = dep_lyr.variant;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Returns StdResult<Vec<u8>>
+///
+/// encode a potion name into its keyword indices
+///
+/// # Arguments
+///
+/// * `storage` - a reference to this contract's storage
+/// * `name` - potion name to encode
+/// * `keywords` - the list of name keywords split by position
+fn encode_name(
+    storage: &dyn Storage,
+    name: &str,
+    keywords: &mut Vec<Vec<String>>,
+) -> StdResult<Vec<u8>> {
+    // get the keywords if needed
+    if keywords.is_empty() {
+        *keywords = may_load::<Vec<Vec<String>>>(storage, NAME_KEYWORD_KEY)?.unwrap_or_default();
+    }
+    let split_name = name.split(' ').collect::<Vec<&str>>();
+    split_name
+        .iter()
+        .enumerate()
+        .map(|(i, n)| {
+            keywords[i]
+                .iter()
+                .position(|k| k == n)
+                .ok_or_else(|| {
+                    StdError::generic_err(format!("Could not find {} in {}th keywords", n, i))
+                })
+                .map(|u| u as u8)
+        })
+        .collect::<StdResult<Vec<u8>>>()
+}
+
+/// Returns StdResult<String>
+///
+/// derive a potion name from its encoded form
+///
+/// # Arguments
+///
+/// * `storage` - a reference to this contract's storage
+/// * `indices` - key word indices
+/// * `keywords` - the list of name keywords split by position
+fn derive_name(
+    storage: &dyn Storage,
+    indices: &[u8],
+    keywords: &mut Vec<Vec<String>>,
+) -> StdResult<String> {
+    // get the keywords if needed
+    if keywords.is_empty() {
+        *keywords = may_load::<Vec<Vec<String>>>(storage, NAME_KEYWORD_KEY)?.unwrap_or_default();
+    }
+    Ok(indices
+        .iter()
+        .enumerate()
+        .map(|(i, idx)| (keywords[i][*idx as usize]).as_str())
+        .collect::<Vec<&str>>()
+        .join(" "))
 }
 
 ///////////////////////////////////// Migrate //////////////////////////////////////
@@ -2124,6 +3170,50 @@ pub fn migrate(deps: DepsMut, env: Env, _msg: Empty) -> StdResult<Response> {
             .to_cosmos_msg(hmn.code_hash, hmn.address, None)?,
         );
     }
+    let raw_potions =
+        may_load::<Vec<StoreContractInfo>>(deps.storage, POTION_721_KEY)?.unwrap_or_default();
+    save(deps.storage, POTION_721_KEY, &raw_potions)?;
+    for ptn in raw_potions.into_iter() {
+        let hmn = ptn.into_humanized(deps.api)?;
+        messages.push(
+            Snip721HandleMsg::RegisterReceiveNft {
+                code_hash: env.contract.code_hash.clone(),
+                also_implements_batch_receive_nft: true,
+            }
+            .to_cosmos_msg(hmn.code_hash, hmn.address, None)?,
+        );
+    }
+    // migrate to new alchemy state format
+
+    /// old alchemy state
+    #[derive(Deserialize)]
+    pub struct OldAlchemyState {
+        /// true if alchemy is halted
+        pub halt: bool,
+        /// StoredLayerId for cyclops
+        pub cyclops: StoredLayerId,
+        /// StoredLayerId for jawless
+        pub jawless: StoredLayerId,
+    }
+
+    let old_st: OldAlchemyState = load(deps.storage, ALCHEMY_STATE_KEY)?;
+    let new_st = AlchemyState {
+        halt: old_st.halt,
+        potion_cnt: 0,
+        found_cnt: 0,
+        disabled: Vec::new(),
+    };
+    save(deps.storage, ALCHEMY_STATE_KEY, &new_st)?;
+    // init the transmutation state
+    let trn_st = TransmuteState {
+        skip: Vec::new(),
+        nones: Vec::new(),
+        jaw_only: Vec::new(),
+        cyclops: old_st.cyclops,
+        jawless: old_st.jawless,
+        skull_idx: 2,
+    };
+    save(deps.storage, TRANSMUTE_STATE_KEY, &trn_st)?;
 
     Ok(Response::new().add_messages(messages))
 }

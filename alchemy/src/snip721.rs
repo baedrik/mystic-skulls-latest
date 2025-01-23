@@ -51,6 +51,8 @@ impl HandleCallback for Snip721HandleMsg {
 pub struct Burn {
     /// tokens being burnt
     pub token_ids: Vec<String>,
+    /// optional memo for the tx
+    pub memo: Option<String>,
 }
 
 /// snip721 query msgs
