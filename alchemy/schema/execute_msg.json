@@ -4,6 +4,31 @@
   "description": "Handle messages",
   "oneOf": [
     {
+      "description": "try to brew a potion",
+      "type": "object",
+      "required": [
+        "brew_potion"
+      ],
+      "properties": {
+        "brew_potion": {
+          "type": "object",
+          "required": [
+            "ingredients"
+          ],
+          "properties": {
+            "ingredients": {
+              "description": "list of order sensitive potion ingredients",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
       "description": "claim staking rewards",
       "type": "object",
       "required": [
@@ -547,6 +572,27 @@
       ],
       "properties": {
         "set_crate_metadata": {
+          "type": "object",
+          "required": [
+            "public_metadata"
+          ],
+          "properties": {
+            "public_metadata": {
+              "$ref": "#/definitions/Metadata"
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "set the potion nft base metadata",
+      "type": "object",
+      "required": [
+        "set_potion_metadata"
+      ],
+      "properties": {
+        "set_potion_metadata": {
           "type": "object",
           "required": [
             "public_metadata"

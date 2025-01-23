@@ -173,6 +173,27 @@
       "additionalProperties": false
     },
     {
+      "description": "response from setting the potion nft base metadata",
+      "type": "object",
+      "required": [
+        "set_potion_metadata"
+      ],
+      "properties": {
+        "set_potion_metadata": {
+          "type": "object",
+          "required": [
+            "public_metadata"
+          ],
+          "properties": {
+            "public_metadata": {
+              "$ref": "#/definitions/Metadata"
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
       "description": "response from removing ingredients from a user's inventory to mint an nft containing them",
       "type": "object",
       "required": [
@@ -478,6 +499,37 @@
               "type": "integer",
               "format": "uint16",
               "minimum": 0.0
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "response from trying to brew a potion",
+      "type": "object",
+      "required": [
+        "brew_potion"
+      ],
+      "properties": {
+        "brew_potion": {
+          "type": "object",
+          "required": [
+            "number_correct"
+          ],
+          "properties": {
+            "number_correct": {
+              "description": "largest number of correct recipe positions for all potions of the attempted size",
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            },
+            "potion_name": {
+              "description": "if successful, the name of the potion created",
+              "type": [
+                "string",
+                "null"
+              ]
             }
           }
         }

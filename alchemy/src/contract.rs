@@ -31,14 +31,16 @@ use crate::snip721::{
     Snip721HandleMsg, Snip721QueryMsg, Trait,
 };
 use crate::state::{
-    AlchemyState, CrateState, SkullStakeInfo, StakingState, StoredIngrSet, StoredLayerId,
-    StoredPotionRules, StoredSetWeight, StoredTraitWeight, StoredVariantList, TransmuteState,
-    Weighted, ADMINS_KEY, ALCHEMY_STATE_KEY, CATEGORIES_KEY, CRATES_KEY, CRATE_META_KEY,
-    CRATE_STATE_KEY, DEPENDENCIES_KEY, INGREDIENTS_KEY, INGRED_SETS_KEY, MATERIALS_KEY,
-    MY_VIEWING_KEY, NAME_KEYWORD_KEY, POTION_721_KEY, PREFIX_NAME_2_POTION_IDX,
-    PREFIX_POTION_IDX_2_RECIPE, PREFIX_POTION_RULES, PREFIX_RECIPES_BY_LEN, PREFIX_REVOKED_PERMITS,
-    PREFIX_SKULL_STAKE, PREFIX_STAKING_TABLE, PREFIX_USER_INGR_INVENTORY, PREFIX_USER_STAKE,
-    PREFIX_VARIANTS, SKULL_721_KEY, STAKING_STATE_KEY, SVG_SERVER_KEY, TRANSMUTE_STATE_KEY,
+    AlchemyState, CrateState, RecipeIdx, SkullStakeInfo, StakingState, StoredIngrSet,
+    StoredLayerId, StoredPotionRules, StoredSetWeight, StoredTraitWeight, StoredVariantList,
+    TransmuteState, Weighted, ADMINS_KEY, ALCHEMY_STATE_KEY, CATEGORIES_KEY, CONSUMED_KEY,
+    CRATES_KEY, CRATE_META_KEY, CRATE_STATE_KEY, DEPENDENCIES_KEY, INGREDIENTS_KEY,
+    INGRED_SETS_KEY, MATERIALS_KEY, MY_VIEWING_KEY, NAME_KEYWORD_KEY, POTION_721_KEY,
+    POTION_META_KEY, PREFIX_NAME_2_POTION_IDX, PREFIX_POTION_DESC, PREFIX_POTION_FOUND,
+    PREFIX_POTION_IDX_2_RECIPE, PREFIX_POTION_RULES, PREFIX_RECIPES_BY_LEN, PREFIX_RECIPE_2_NAME,
+    PREFIX_REVOKED_PERMITS, PREFIX_SKULL_STAKE, PREFIX_STAKING_TABLE, PREFIX_USER_INGR_INVENTORY,
+    PREFIX_USER_STAKE, PREFIX_VARIANTS, SKULL_721_KEY, STAKING_STATE_KEY, SVG_SERVER_KEY,
+    TRANSMUTE_STATE_KEY,
 };
 use crate::storage::{load, may_load, save};
 
@@ -198,6 +200,7 @@ pub fn execute(deps: DepsMut, env: Env, info: MessageInfo, msg: ExecuteMsg) -> S
     let response = match msg {
         ExecuteMsg::CreateViewingKey { entropy } => try_create_key(deps, &env, &info, &entropy),
         ExecuteMsg::SetViewingKey { key, .. } => try_set_key(deps, &info.sender, key),
+        ExecuteMsg::BrewPotion { ingredients } => try_brew(deps, info.sender, ingredients),
         ExecuteMsg::DisablePotions { by_name, by_index } => {
             try_toggle_potions(deps, &info.sender, by_name, by_index, true)
         }
@@ -232,7 +235,10 @@ pub fn execute(deps: DepsMut, env: Env, info: MessageInfo, msg: ExecuteMsg) -> S
             crating,
         } => try_set_halt(deps, &info.sender, staking, alchemy, crating),
         ExecuteMsg::SetCrateMetadata { public_metadata } => {
-            try_set_crate_meta(deps, &info.sender, public_metadata)
+            try_set_meta(deps, &info.sender, public_metadata, true)
+        }
+        ExecuteMsg::SetPotionMetadata { public_metadata } => {
+            try_set_meta(deps, &info.sender, public_metadata, false)
         }
         ExecuteMsg::CrateIngredients { ingredients } => {
             try_mint_crate(deps, info.sender, ingredients)
@@ -272,6 +278,130 @@ pub fn execute(deps: DepsMut, env: Env, info: MessageInfo, msg: ExecuteMsg) -> S
     };
     pad_handle_result(response, BLOCK_SIZE)
 }
+/// Returns StdResult<Response>
+///
+/// try to brew a potion
+///
+/// # Arguments
+///
+/// * `deps` - a mutable reference to Extern containing all the contract's external dependencies
+/// * `sender` - the message sender
+/// * `recipe` - order sensitive list of ingredients
+fn try_brew(deps: DepsMut, sender: Addr, recipe: Vec<String>) -> StdResult<Response> {
+    let mut alc_st: AlchemyState = load(deps.storage, ALCHEMY_STATE_KEY)?;
+    if alc_st.halt {
+        return Err(StdError::generic_err("Alchemy has been halted"));
+    }
+    let recipe_len = recipe.len() as u8;
+    if !(5..=9).contains(&recipe_len) {
+        return Err(StdError::generic_err(
+            "All recipes are from 5 to 9 ingredients long, inclusive",
+        ));
+    }
+    let mut consumed = may_load::<u128>(deps.storage, CONSUMED_KEY)?.unwrap_or(0);
+    // get the ingredient list and the user's inventory
+    let user_raw = deps.api.addr_canonicalize(sender.as_str())?;
+    let user_key = user_raw.as_slice();
+    let (ingredients, mut raw_inv) = get_inventory(deps.storage, user_key)?;
+    let mut brew = Vec::new();
+    // decrement from inventory and create recipe indices
+    for ingr in recipe.iter() {
+        let idx = ingredients
+            .iter()
+            .position(|i| *i == *ingr)
+            .ok_or_else(|| StdError::generic_err(format!("{} is not a known ingredient", ingr)))?;
+        raw_inv[idx] = raw_inv[idx]
+            .checked_sub(1)
+            .ok_or_else(|| StdError::generic_err(format!("You do not have enough {}", ingr)))?;
+        brew.push(idx as u8);
+        // don't see this overflowing in earth's lifetime
+        consumed += 1;
+    }
+    // save consumption count and updated inventory
+    save(deps.storage, CONSUMED_KEY, &consumed)?;
+    let mut inv_store = PrefixedStorage::new(deps.storage, PREFIX_USER_INGR_INVENTORY);
+    save(&mut inv_store, user_key, &raw_inv)?;
+    let rc2nm_store = ReadonlyPrefixedStorage::new(deps.storage, PREFIX_RECIPE_2_NAME);
+    let (number_correct, potion_name, messages) =
+        if let Some(encoded) = may_load::<Vec<u8>>(&rc2nm_store, brew.as_slice())? {
+            // it's a potion
+            let idx_store = ReadonlyPrefixedStorage::new(deps.storage, PREFIX_NAME_2_POTION_IDX);
+            // check if this potion has been disabled
+            let name_key = encoded.as_slice();
+            let ptn_idx = may_load::<u16>(&idx_store, name_key)?
+                .ok_or_else(|| StdError::generic_err("Potion name to index storage is corrupt"))?;
+            if alc_st.disabled.contains(&ptn_idx) {
+                return Err(StdError::generic_err("This potion is currently disabled"));
+            }
+            let mut found_store = PrefixedStorage::new(deps.storage, PREFIX_POTION_FOUND);
+            let idx_key = ptn_idx.to_le_bytes();
+            if may_load::<bool>(&found_store, &idx_key)?.is_none() {
+                // first time finding this potion
+                alc_st.found_cnt += 1;
+                save(&mut found_store, &idx_key, &true)?;
+                save(deps.storage, ALCHEMY_STATE_KEY, &alc_st)?;
+            }
+            let mut public_metadata: Metadata = load(deps.storage, POTION_META_KEY)?;
+            let potion_name = derive_name(deps.storage, name_key, &mut Vec::new())?;
+            public_metadata.extension.name = Some(potion_name.clone());
+            let desc_store = ReadonlyPrefixedStorage::new(deps.storage, PREFIX_POTION_DESC);
+            if let Some(addition) = may_load::<String>(&desc_store, name_key)? {
+                public_metadata.extension.description = Some(format!(
+                    "{}\n{}",
+                    public_metadata.extension.description.ok_or_else(|| {
+                        StdError::generic_err("Potion metadata is missing Description")
+                    })?,
+                    addition
+                ));
+            }
+            let mut raw_ptns: Vec<StoreContractInfo> = load(deps.storage, POTION_721_KEY)?;
+            let ptn_contract = raw_ptns
+                .pop()
+                .ok_or_else(|| StdError::generic_err("Potion contracts storage is corrupt"))
+                .and_then(|s| s.into_humanized(deps.api))?;
+            let messages = vec![Snip721HandleMsg::MintNft {
+                owner: sender.into_string(),
+                public_metadata,
+            }
+            .to_cosmos_msg(ptn_contract.code_hash, ptn_contract.address, None)?];
+            (recipe_len, Some(potion_name), messages)
+        } else {
+            // not a potion
+            let by_len_store = ReadonlyPrefixedStorage::new(deps.storage, PREFIX_RECIPES_BY_LEN);
+            // get all recipes with same length
+            let cookbook = may_load::<Vec<RecipeIdx>>(&by_len_store, &recipe_len.to_le_bytes())?
+                .unwrap_or_default();
+            let mut correct = 0u8;
+            // see how close this is to a recipe
+            for rcidx in cookbook.iter() {
+                if !alc_st.disabled.contains(&rcidx.idx) {
+                    // only check potions that have not been disabled
+                    let matches = brew
+                        .iter()
+                        .zip(rcidx.recipe.iter())
+                        .filter(|(b, r)| *b == *r)
+                        .count() as u8;
+                    if matches > correct {
+                        correct = matches;
+                        if correct >= recipe_len - 1 {
+                            // can stop if only 1 wrong
+                            break;
+                        }
+                    }
+                }
+            }
+            (correct, None, Vec::new())
+        };
+    let mut resp = Response::new();
+    if !messages.is_empty() {
+        resp = resp.add_messages(messages);
+    }
+
+    Ok(resp.set_data(to_binary(&ExecuteAnswer::BrewPotion {
+        potion_name,
+        number_correct,
+    })?))
+}
 
 /// Returns StdResult<Response>
 ///
@@ -294,14 +424,9 @@ fn try_mint_crate(
     let user_raw = deps.api.addr_canonicalize(sender.as_str())?;
     let user_key = user_raw.as_slice();
     let mut updated_inventory: Vec<IngredientQty> = Vec::new();
-    // get list of all ingredients
-    let ingredients: Vec<String> = may_load(deps.storage, INGREDIENTS_KEY)?.unwrap_or_default();
+    // get list of all ingredients and the user's inventory
+    let (ingredients, mut raw_inv) = get_inventory(deps.storage, user_key)?;
     let ingr_cnt = ingredients.len();
-    // get user's inventory
-    let mut inv_store = PrefixedStorage::new(deps.storage, PREFIX_USER_INGR_INVENTORY);
-    let mut raw_inv: Vec<u32> = may_load(&inv_store, user_key)?.unwrap_or_default();
-    // just in case new ingredients get added, extend old inventories
-    raw_inv.resize(ingr_cnt, 0);
     let mut for_crate: Vec<u32> = vec![0; ingr_cnt];
     // remove the crated ingredients from the user inventory
     for ing_qty in crate_ingredients.into_iter() {
@@ -321,6 +446,7 @@ fn try_mint_crate(
             )));
         }
     }
+    let mut inv_store = PrefixedStorage::new(deps.storage, PREFIX_USER_INGR_INVENTORY);
     save(&mut inv_store, user_key, &raw_inv)?;
     let mut public_metadata: Metadata = load(deps.storage, CRATE_META_KEY)?;
     let mut attrs: Vec<Trait> = Vec::new();
@@ -491,16 +617,11 @@ fn try_set_stake(
     )?;
     if !not_owned.is_empty() {
         // error out if any or not owned
-        let mut err_str = "You do not own skull(s): ".to_string();
-        let mut first_id = true;
-        for id in not_owned.iter() {
-            if !first_id {
-                err_str.push_str(", ");
-            }
-            err_str.push_str(id);
-            first_id = false;
-        }
-        return Err(StdError::generic_err(err_str));
+        let joined = not_owned.join(", ");
+        return Err(StdError::generic_err(format!(
+            "You do not own skull(s): {}",
+            joined
+        )));
     }
     let user_store = ReadonlyPrefixedStorage::new(deps.storage, PREFIX_USER_STAKE);
     let user_raw = deps.api.addr_canonicalize(sender.as_str())?;
@@ -717,10 +838,10 @@ fn try_define_potions(
         let mut encoded: Vec<u8> = Vec::new();
         let mut not_unique = true;
         while not_unique {
-            encoded = Vec::new();
-            for cnt in word_cnts.iter() {
-                encoded.push((prng.next_u64() % *cnt) as u8);
-            }
+            encoded = word_cnts
+                .iter()
+                .map(|u| (prng.next_u64() % u) as u8)
+                .collect::<Vec<u8>>();
             not_unique = may_load::<u16>(&idx_store, encoded.as_slice())?.is_some();
         }
         save(&mut idx_store, encoded.as_slice(), &alc_st.potion_cnt)?;
@@ -1064,27 +1185,32 @@ fn try_set_halt(
 
 /// Returns StdResult<Response>
 ///
-/// set the base metadata for crate nfts
+/// set the base metadata for crate and potion nfts
 ///
 /// # Arguments
 ///
 /// * `deps` - a mutable reference to Extern containing all the contract's external dependencies
 /// * `sender` - a reference to the message sender
-/// * `public_metadata` - base metadata for crate nfts
-fn try_set_crate_meta(
+/// * `public_metadata` - base metadata for crate/potion nfts
+/// * `for_crate` - true if this metadata is for crate nfts
+fn try_set_meta(
     deps: DepsMut,
     sender: &Addr,
     public_metadata: Metadata,
+    for_crate: bool,
 ) -> StdResult<Response> {
     // only allow admins to do this
     check_admin_tx(deps.as_ref(), sender)?;
-    save(deps.storage, CRATE_META_KEY, &public_metadata)?;
 
-    Ok(
-        Response::new().set_data(to_binary(&ExecuteAnswer::SetCrateMetadata {
-            public_metadata,
-        })?),
-    )
+    let resp = if for_crate {
+        save(deps.storage, CRATE_META_KEY, &public_metadata)?;
+        ExecuteAnswer::SetCrateMetadata { public_metadata }
+    } else {
+        save(deps.storage, POTION_META_KEY, &public_metadata)?;
+        ExecuteAnswer::SetPotionMetadata { public_metadata }
+    };
+
+    Ok(Response::new().set_data(to_binary(&resp)?))
 }
 
 /// Returns StdResult<Response>
@@ -1535,6 +1661,9 @@ pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
             page,
             page_size,
         } => query_rules(deps, viewer, permit, page, page_size, &env.contract.address),
+        QueryMsg::MintingMetadata { viewer, permit } => {
+            query_meta(deps, viewer, permit, &env.contract.address)
+        }
         QueryMsg::States { viewer, permit } => {
             query_state(deps, viewer, permit, &env.contract.address)
         }
@@ -2113,6 +2242,31 @@ fn query_state(
     })
 }
 
+/// Returns StdResult<Binary> displaying the crate and potion metadata
+///
+/// # Arguments
+///
+/// * `deps` - reference to Extern containing all the contract's external dependencies
+/// * `viewer` - optional address and key making an authenticated query request
+/// * `permit` - optional permit with "owner" permission
+/// * `my_addr` - a reference to this contract's address
+fn query_meta(
+    deps: Deps,
+    viewer: Option<ViewerInfo>,
+    permit: Option<Permit>,
+    my_addr: &Addr,
+) -> StdResult<Binary> {
+    // only allow admins to do this
+    check_admin_query(deps, viewer, permit, my_addr)?;
+    let crate_metadata = may_load::<Metadata>(deps.storage, CRATE_META_KEY)?.unwrap_or_default();
+    let potion_metadata = may_load::<Metadata>(deps.storage, POTION_META_KEY)?.unwrap_or_default();
+
+    to_binary(&QueryAnswer::MintingMetadata {
+        crate_metadata,
+        potion_metadata,
+    })
+}
+
 /// Returns StdResult<Binary> displaying the keywords used to generate potion names
 ///
 /// # Arguments
@@ -2516,19 +2670,17 @@ fn process_charges(
     user_key: &[u8],
 ) -> StdResult<Vec<IngredientQty>> {
     let mut rewards: Vec<IngredientQty> = Vec::new();
-    let ingredients: Vec<String> = may_load(storage, INGREDIENTS_KEY)?.unwrap_or_default();
+    // get ingredient list and user's inventory
+    let (ingredients, mut raw_inv) = get_inventory(storage, user_key)?;
     let ingr_cnt = ingredients.len();
     // generate the ingredients
     let generated = gen_resources(storage, env, charges, quantities, ingr_cnt)?;
-    let mut inv_store = PrefixedStorage::new(storage, PREFIX_USER_INGR_INVENTORY);
-    let mut inventory: Vec<u32> = may_load(&inv_store, user_key)?.unwrap_or_default();
-    // just in case new ingredients get added, extend old inventories
-    inventory.resize(ingr_cnt, 0);
     // add the newly generated resources
-    for (inv, new) in inventory.iter_mut().zip(&generated) {
+    for (inv, new) in raw_inv.iter_mut().zip(&generated) {
         *inv += *new;
     }
-    save(&mut inv_store, user_key, &inventory)?;
+    let mut inv_store = PrefixedStorage::new(storage, PREFIX_USER_INGR_INVENTORY);
+    save(&mut inv_store, user_key, &raw_inv)?;
     // create the list of generated resources for the output
     for (i, quantity) in generated.into_iter().enumerate() {
         if quantity > 0 {
@@ -2551,12 +2703,8 @@ fn process_charges(
 /// * `user_key` - user address storage key
 fn display_inventory(storage: &dyn Storage, user_key: &[u8]) -> StdResult<Vec<IngredientQty>> {
     let mut inventory: Vec<IngredientQty> = Vec::new();
-    let ingredients: Vec<String> = may_load(storage, INGREDIENTS_KEY)?.unwrap_or_default();
-    let ingr_cnt = ingredients.len();
-    let inv_store = ReadonlyPrefixedStorage::new(storage, PREFIX_USER_INGR_INVENTORY);
-    let mut raw_inv: Vec<u32> = may_load(&inv_store, user_key)?.unwrap_or_default();
-    // just in case new ingredients get added, extend old inventories
-    raw_inv.resize(ingr_cnt, 0);
+    // get the ingredient list and the user's inventory
+    let (ingredients, raw_inv) = get_inventory(storage, user_key)?;
     // create the readable list of ingredients
     for (i, quantity) in raw_inv.into_iter().enumerate() {
         inventory.push(IngredientQty {
@@ -2565,6 +2713,24 @@ fn display_inventory(storage: &dyn Storage, user_key: &[u8]) -> StdResult<Vec<In
         });
     }
     Ok(inventory)
+}
+
+/// Returns StdResult<(Vec<String>, Vec<u32>)>
+///
+/// retrieve the ingredient list and the user's inventory
+///
+/// # Arguments
+///
+/// * `storage` - a reference to this contract's storage
+/// * `user_key` - user address storage key
+fn get_inventory(storage: &dyn Storage, user_key: &[u8]) -> StdResult<(Vec<String>, Vec<u32>)> {
+    let ingredients: Vec<String> = may_load(storage, INGREDIENTS_KEY)?.unwrap_or_default();
+    let ingr_cnt = ingredients.len();
+    let inv_store = ReadonlyPrefixedStorage::new(storage, PREFIX_USER_INGR_INVENTORY);
+    let mut raw_inv: Vec<u32> = may_load(&inv_store, user_key)?.unwrap_or_default();
+    // just in case new ingredients get added, extend old inventories
+    raw_inv.resize(ingr_cnt, 0);
+    Ok((ingredients, raw_inv))
 }
 
 /// Returns StdResult<Response>
@@ -2593,14 +2759,9 @@ fn uncrate(
         .addr_validate(from)
         .and_then(|a| deps.api.addr_canonicalize(a.as_str()))?;
     let user_key = user_raw.as_slice();
-    // get list of ingredients
-    let ingredients: Vec<String> = may_load(deps.storage, INGREDIENTS_KEY)?.unwrap_or_default();
+    // get the ingredient list and the user's inventory
+    let (ingredients, mut raw_inv) = get_inventory(deps.storage, user_key)?;
     let ingr_cnt = ingredients.len();
-    // get user's inventory
-    let mut inv_store = PrefixedStorage::new(deps.storage, PREFIX_USER_INGR_INVENTORY);
-    let mut raw_inv: Vec<u32> = may_load(&inv_store, user_key)?.unwrap_or_default();
-    // just in case new ingredients get added, extend old inventories
-    raw_inv.resize(ingr_cnt, 0);
     // get the public metadata of all nfts sent
     let dossiers = Snip721QueryMsg::BatchNftDossier {
         token_ids: token_ids.clone(),
@@ -2638,6 +2799,7 @@ fn uncrate(
     for (i, qty) in added.iter().enumerate() {
         resp = resp.add_attribute(ingredients[i].clone(), qty.to_string());
     }
+    let mut inv_store = PrefixedStorage::new(deps.storage, PREFIX_USER_INGR_INVENTORY);
     save(&mut inv_store, user_key, &raw_inv)?;
     Ok(resp)
 }
@@ -2709,14 +2871,10 @@ fn rcv_potion(
             .addr_validate(from)
             .and_then(|a| deps.api.addr_canonicalize(a.as_str()))?;
         let user_key = user_raw.as_slice();
-        // get list of ingredients
-        ingredients = may_load::<Vec<String>>(deps.storage, INGREDIENTS_KEY)?.unwrap_or_default();
+        // get list of ingredients and the user's inventory
+        let (ingr, mut raw_inv) = get_inventory(deps.storage, user_key)?;
+        ingredients = ingr;
         let ingr_cnt = ingredients.len();
-        // get user's inventory
-        let mut inv_store = PrefixedStorage::new(deps.storage, PREFIX_USER_INGR_INVENTORY);
-        let mut raw_inv: Vec<u32> = may_load(&inv_store, user_key)?.unwrap_or_default();
-        // just in case new ingredients get added, extend old inventories
-        raw_inv.resize(ingr_cnt, 0);
         added_inv = vec![0; ingr_cnt];
         // increment the recipe ingredients
         for i in recipe.into_iter() {
@@ -2724,6 +2882,7 @@ fn rcv_potion(
             raw_inv[big_i] += 1;
             added_inv[big_i] += 1;
         }
+        let mut inv_store = PrefixedStorage::new(deps.storage, PREFIX_USER_INGR_INVENTORY);
         save(&mut inv_store, user_key, &raw_inv)?;
         memo = Some("Distilled for ingredients".to_string());
         changed_str = String::new();

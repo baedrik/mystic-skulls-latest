@@ -4,6 +4,41 @@
   "description": "responses to queries",
   "oneOf": [
     {
+      "description": "displays the common potion and crate metadata",
+      "type": "object",
+      "required": [
+        "minting_metadata"
+      ],
+      "properties": {
+        "minting_metadata": {
+          "type": "object",
+          "required": [
+            "crate_metadata",
+            "potion_metadata"
+          ],
+          "properties": {
+            "crate_metadata": {
+              "description": "metadata used when minting crate nfts",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/Metadata"
+                }
+              ]
+            },
+            "potion_metadata": {
+              "description": "metadata used when minting potion nfts",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/Metadata"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
       "description": "displays if the user and token list are eligible for a first time staking bonus",
       "type": "object",
       "required": [
@@ -758,6 +793,50 @@
         }
       }
     },
+    "Extension": {
+      "description": "metadata extension You can add any metadata fields you need here.  These fields are based on https://docs.opensea.io/docs/metadata-standards and are the metadata fields that Stashh uses for robust NFT display.  Urls should be prefixed with `http://`, `https://`, `ipfs://`, or `ar://`",
+      "type": "object",
+      "properties": {
+        "attributes": {
+          "description": "item attributes",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/Trait"
+          }
+        },
+        "description": {
+          "description": "item description",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "image": {
+          "description": "url to the image",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "image_data": {
+          "description": "raw SVG image data (not recommended). Only use this if you're not including the image parameter",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "description": "name of the item",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
     "IngrSetWeight": {
       "description": "ingredient sets and their staking weight",
       "type": "object",
@@ -834,6 +913,23 @@
         "variant": {
           "description": "the variant name",
           "type": "string"
+        }
+      }
+    },
+    "Metadata": {
+      "description": "token metadata",
+      "type": "object",
+      "required": [
+        "extension"
+      ],
+      "properties": {
+        "extension": {
+          "description": "on-chain metadata",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Extension"
+            }
+          ]
         }
       }
     },
@@ -925,6 +1021,24 @@
           "type": "integer",
           "format": "uint8",
           "minimum": 0.0
+        }
+      }
+    },
+    "Trait": {
+      "description": "attribute trait",
+      "type": "object",
+      "required": [
+        "trait_type",
+        "value"
+      ],
+      "properties": {
+        "trait_type": {
+          "description": "name of the trait",
+          "type": "string"
+        },
+        "value": {
+          "description": "trait value",
+          "type": "string"
         }
       }
     },

@@ -34,6 +34,11 @@ pub struct InstantiateMsg {
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ExecuteMsg {
+    /// try to brew a potion
+    BrewPotion {
+        /// list of order sensitive potion ingredients
+        ingredients: Vec<String>,
+    },
     /// claim staking rewards
     ClaimStake {},
     /// set the staking list
@@ -141,6 +146,8 @@ pub enum ExecuteMsg {
     },
     /// set the crate nft base metadata
     SetCrateMetadata { public_metadata: Metadata },
+    /// set the potion nft base metadata
+    SetPotionMetadata { public_metadata: Metadata },
     /// BatchReceiveNft is called when this contract is sent an NFT (potion or crate)
     BatchReceiveNft {
         /// address of the previous owner of the token being sent
@@ -202,6 +209,8 @@ pub enum ExecuteAnswer {
     },
     /// response from setting the crate nft base metadata
     SetCrateMetadata { public_metadata: Metadata },
+    /// response from setting the potion nft base metadata
+    SetPotionMetadata { public_metadata: Metadata },
     /// response from removing ingredients from a user's inventory to mint an nft containing them
     CrateIngredients {
         updated_inventory: Vec<IngredientQty>,
@@ -269,6 +278,14 @@ pub enum ExecuteAnswer {
         // current potion count
         potion_count: u16,
     },
+    /// response from trying to brew a potion
+    BrewPotion {
+        /// if successful, the name of the potion created
+        potion_name: Option<String>,
+        /// largest number of correct recipe positions for all potions of the
+        /// attempted size
+        number_correct: u8,
+    },
     /// response from revoking a permit
     RevokePermit { status: String },
 }
@@ -281,6 +298,14 @@ pub enum QueryMsg {
     HaltStatuses {},
     /// displays the staking, crating, transmute, and alchemy states
     States {
+        /// optional address and viewing key of an admin
+        viewer: Option<ViewerInfo>,
+        /// optional permit used to verify admin identity.  If both viewer and permit
+        /// are provided, the viewer will be ignored
+        permit: Option<Permit>,
+    },
+    /// displays the common potion and crate metadata
+    MintingMetadata {
         /// optional address and viewing key of an admin
         viewer: Option<ViewerInfo>,
         /// optional permit used to verify admin identity.  If both viewer and permit
@@ -420,6 +445,13 @@ pub enum QueryMsg {
 #[derive(Serialize, Deserialize, Debug, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum QueryAnswer {
+    /// displays the common potion and crate metadata
+    MintingMetadata {
+        /// metadata used when minting crate nfts
+        crate_metadata: Metadata,
+        /// metadata used when minting potion nfts
+        potion_metadata: Metadata,
+    },
     /// displays if the user and token list are eligible for a first time staking bonus
     TokensEligibleForBonus {
         /// true if the user is eligible for the first time staking bonus

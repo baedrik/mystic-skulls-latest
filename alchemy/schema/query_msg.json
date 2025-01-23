@@ -54,6 +54,43 @@
       "additionalProperties": false
     },
     {
+      "description": "displays the common potion and crate metadata",
+      "type": "object",
+      "required": [
+        "minting_metadata"
+      ],
+      "properties": {
+        "minting_metadata": {
+          "type": "object",
+          "properties": {
+            "permit": {
+              "description": "optional permit used to verify admin identity.  If both viewer and permit are provided, the viewer will be ignored",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Permit_for_TokenPermissions"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "viewer": {
+              "description": "optional address and viewing key of an admin",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/ViewerInfo"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
       "description": "displays the keywords used to generate potion names",
       "type": "object",
       "required": [

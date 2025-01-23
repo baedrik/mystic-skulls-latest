@@ -21,6 +21,10 @@ pub const STAKING_STATE_KEY: &[u8] = b"stkst";
 pub const CRATE_STATE_KEY: &[u8] = b"crtst";
 /// storage key for the crating base metadata
 pub const CRATE_META_KEY: &[u8] = b"metcrt";
+/// storage key for the potion base metadata
+pub const POTION_META_KEY: &[u8] = b"potmet";
+/// storage key for number of ingredients consumed
+pub const CONSUMED_KEY: &[u8] = b"cnsm";
 /// storage key for the AlchemyState
 pub const ALCHEMY_STATE_KEY: &[u8] = b"alcst";
 /// storage key for the TransmuteState
@@ -53,6 +57,12 @@ pub const PREFIX_NAME_2_POTION_IDX: &[u8] = b"idxpt";
 pub const PREFIX_POTION_IDX_2_RECIPE: &[u8] = b"recpt";
 /// storage prefix for recipes grouped by length
 pub const PREFIX_RECIPES_BY_LEN: &[u8] = b"rcpln";
+/// storage prefix for mapping recipes to potion names
+pub const PREFIX_RECIPE_2_NAME: &[u8] = b"r2nm";
+/// storage prefix for whether a potion has been discovered
+pub const PREFIX_POTION_FOUND: &[u8] = b"found";
+/// storage prefix for potion NFT descriptions
+pub const PREFIX_POTION_DESC: &[u8] = b"desc";
 /// storage key for this contract's viewing key with other contracts
 pub const MY_VIEWING_KEY: &[u8] = b"myview";
 /// prefix for the storage of staking tables
