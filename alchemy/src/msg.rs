@@ -330,6 +330,8 @@ pub enum QueryMsg {
     },
     /// displays the code hashes and addresses of used contracts
     Contracts {},
+    /// displays the counts of potions discovered and number of ingredients consumed in brewing
+    Counts {},
     /// only displays a user's ingredients inventory (less intensive than MyStaking if you only
     /// need the inventory because it doesn't have to call the skulls contract to verify ownership
     /// of multiple skulls)
@@ -445,6 +447,11 @@ pub enum QueryMsg {
 #[derive(Serialize, Deserialize, Debug, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum QueryAnswer {
+    /// displays the counts of potions discovered and ingredients consumed in brewing
+    Counts {
+        potions_discovered: u16,
+        ingredients_consumed: Uint128,
+    },
     /// displays the common potion and crate metadata
     MintingMetadata {
         /// metadata used when minting crate nfts
@@ -604,6 +611,8 @@ pub struct DisplayPotionRules {
     pub jaw_only: bool,
     /// true if the recipe has been generated
     pub has_recipe: bool,
+    /// testing fields TODO remove
+    pub testing: Testing,
 }
 
 /// the address and viewing key making an authenticated query request
@@ -847,4 +856,13 @@ impl Weighted for PotionWeight {
     fn weight(&self) -> u16 {
         self.weight
     }
+}
+
+/// some query fields only used during testing TODO remove
+#[derive(Serialize, Deserialize, JsonSchema, Clone, PartialEq, Eq, Debug)]
+pub struct Testing {
+    /// true if this potion has been discovered
+    pub found: bool,
+    /// this potion's recipe
+    pub recipe: Vec<String>,
 }

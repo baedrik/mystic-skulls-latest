@@ -4,6 +4,33 @@
   "description": "responses to queries",
   "oneOf": [
     {
+      "description": "displays the counts of potions discovered and ingredients consumed in brewing",
+      "type": "object",
+      "required": [
+        "counts"
+      ],
+      "properties": {
+        "counts": {
+          "type": "object",
+          "required": [
+            "ingredients_consumed",
+            "potions_discovered"
+          ],
+          "properties": {
+            "ingredients_consumed": {
+              "$ref": "#/definitions/Uint128"
+            },
+            "potions_discovered": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0.0
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
       "description": "displays the common potion and crate metadata",
       "type": "object",
       "required": [
@@ -694,7 +721,8 @@
         "normal_weights",
         "potion_idx",
         "potion_weights",
-        "required_traits"
+        "required_traits",
+        "testing"
       ],
       "properties": {
         "cyclops_weights": {
@@ -761,6 +789,14 @@
           "items": {
             "$ref": "#/definitions/VariantList"
           }
+        },
+        "testing": {
+          "description": "testing fields TODO remove",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Testing"
+            }
+          ]
         }
       }
     },
@@ -1021,6 +1057,27 @@
           "type": "integer",
           "format": "uint8",
           "minimum": 0.0
+        }
+      }
+    },
+    "Testing": {
+      "description": "some query fields only used during testing TODO remove",
+      "type": "object",
+      "required": [
+        "found",
+        "recipe"
+      ],
+      "properties": {
+        "found": {
+          "description": "true if this potion has been discovered",
+          "type": "boolean"
+        },
+        "recipe": {
+          "description": "this potion's recipe",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       }
     },

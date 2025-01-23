@@ -178,6 +178,19 @@
       "additionalProperties": false
     },
     {
+      "description": "displays the counts of potions discovered and number of ingredients consumed in brewing",
+      "type": "object",
+      "required": [
+        "counts"
+      ],
+      "properties": {
+        "counts": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
       "description": "only displays a user's ingredients inventory (less intensive than MyStaking if you only need the inventory because it doesn't have to call the skulls contract to verify ownership of multiple skulls)",
       "type": "object",
       "required": [

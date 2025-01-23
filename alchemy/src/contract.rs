@@ -20,8 +20,8 @@ use crate::contract_info::{ContractInfo, StoreContractInfo};
 use crate::msg::{
     ChargeInfo, Dependencies, DisplayCrateState, DisplayPotionRules, EligibilityInfo,
     ExecuteAnswer, ExecuteMsg, IngrSetWeight, IngredientQty, IngredientSet, InstantiateMsg,
-    PotionStats, PotionWeight, QueryAnswer, QueryMsg, StakingTable, TraitWeight, VariantIdxName,
-    VariantList, ViewerInfo,
+    PotionStats, PotionWeight, QueryAnswer, QueryMsg, StakingTable, Testing, TraitWeight,
+    VariantIdxName, VariantList, ViewerInfo,
 };
 use crate::server_msgs::{
     LayerNamesWrapper, ServeAlchemyWrapper, ServerQueryMsg, StoredDependencies,
@@ -1599,6 +1599,7 @@ pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
         }
         QueryMsg::HaltStatuses {} => query_halt(deps.storage),
         QueryMsg::Contracts {} => query_contracts(deps),
+        QueryMsg::Counts {} => query_counts(deps.storage),
         QueryMsg::MyStaking { viewer, permit } => query_my_stake(deps, env, viewer, permit),
         QueryMsg::MyIngredients { viewer, permit } => {
             query_my_inv(deps, viewer, permit, &env.contract.address)
@@ -1705,12 +1706,30 @@ fn query_rules(
     let p2r_store = ReadonlyPrefixedStorage::new(deps.storage, PREFIX_POTION_IDX_2_RECIPE);
     let mut potion_rules = Vec::new();
 
+    // TODO remove
+    let ingredients: Vec<String> = may_load(deps.storage, INGREDIENTS_KEY)?.unwrap_or_default();
+    let found_store = ReadonlyPrefixedStorage::new(deps.storage, PREFIX_POTION_FOUND);
+
     for idx in start..end {
         let is_disabled = alc_st.disabled.contains(&idx);
         let ptn_key = idx.to_le_bytes();
         if let Some(rules) = may_load::<StoredPotionRules>(&rul_store, &ptn_key)? {
             // check if a recipe was generated
-            let has_recipe = may_load::<Vec<u8>>(&p2r_store, &ptn_key)?.is_some();
+            // TODO let has_recipe = may_load::<Vec<u8>>(&p2r_store, &ptn_key)?.is_some();
+
+            let (has_recipe, recipe, found) =
+                if let Some(rcp) = may_load::<Vec<u8>>(&p2r_store, &ptn_key)? {
+                    (
+                        true,
+                        rcp.iter()
+                            .map(|i| ingredients[*i as usize].clone())
+                            .collect::<Vec<String>>(),
+                        may_load::<bool>(&found_store, &ptn_key)?.is_some(),
+                    )
+                } else {
+                    (false, Vec::new(), false)
+                };
+            let testing = Testing { found, recipe };
 
             potion_rules.push(DisplayPotionRules {
                 potion_idx: idx,
@@ -1741,6 +1760,7 @@ fn query_rules(
                 is_disabled,
                 jaw_only: trn_st.jaw_only.contains(&idx),
                 has_recipe,
+                testing,
             });
         }
     }
@@ -2178,6 +2198,23 @@ fn query_ingr(storage: &dyn Storage) -> StdResult<Binary> {
     let ingredients: Vec<String> = may_load(storage, INGREDIENTS_KEY)?.unwrap_or_default();
 
     to_binary(&QueryAnswer::Ingredients { ingredients })
+}
+
+/// Returns StdResult<Binary> displaying the counts of potions discovered and ingredients
+/// consumed
+///
+/// # Arguments
+///
+/// * `storage` - a reference to the storage this item is in
+fn query_counts(storage: &dyn Storage) -> StdResult<Binary> {
+    let alc_st: AlchemyState = load(storage, ALCHEMY_STATE_KEY)?;
+    let potions_discovered = alc_st.found_cnt;
+    let ingredients_consumed = Uint128::new(may_load::<u128>(storage, CONSUMED_KEY)?.unwrap_or(0));
+
+    to_binary(&QueryAnswer::Counts {
+        potions_discovered,
+        ingredients_consumed,
+    })
 }
 
 /// Returns StdResult<Binary> displaying the skull materials and their indices
