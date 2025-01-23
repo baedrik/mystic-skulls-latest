@@ -1158,8 +1158,18 @@ fn try_set_halt(
     }
     // if setting alchemy halt status
     if let Some(alc) = alchemy {
+        // if it would change
         if alc_st.halt != alc {
             alc_st.halt = alc;
+            // if enabling alchemy
+            if !alc_st.halt {
+                // verify that we have potion nft metadata
+                if may_load::<Metadata>(deps.storage, POTION_META_KEY)?.is_none() {
+                    return Err(StdError::generic_err(
+                        "Potion metadata has not been added yet",
+                    ));
+                }
+            }
             save(deps.storage, ALCHEMY_STATE_KEY, &alc_st)?;
         }
     }
