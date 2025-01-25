@@ -50,6 +50,31 @@
       "additionalProperties": false
     },
     {
+      "description": "response from rewinding a skull image",
+      "type": "object",
+      "required": [
+        "rewind"
+      ],
+      "properties": {
+        "rewind": {
+          "type": "object",
+          "required": [
+            "categories_rewound"
+          ],
+          "properties": {
+            "categories_rewound": {
+              "description": "the categories that were reverted",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
       "description": "response from adding ingredients",
       "type": "object",
       "required": [

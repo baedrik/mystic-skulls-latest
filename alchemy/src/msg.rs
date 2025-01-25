@@ -48,7 +48,6 @@ pub enum ExecuteMsg {
     },
     /// remove ingredients from a user's inventory to mint an nft containing them
     CrateIngredients { ingredients: Vec<IngredientQty> },
-    /* TODO
     /// consume 3 ingredients to rewind the state of a skull if eligible
     Rewind {
         /// the token id of the skull to be rewound
@@ -56,7 +55,6 @@ pub enum ExecuteMsg {
         /// the ingredients to consume
         ingredients: Vec<IngredientQty>,
     },
-    */
     /// Create a viewing key
     CreateViewingKey { entropy: String },
     /// Set a viewing key
@@ -186,6 +184,11 @@ pub enum ExecuteAnswer {
         /// current admins
         admins: Vec<Addr>,
     },
+    /// response from rewinding a skull image
+    Rewind {
+        /// the categories that were reverted
+        categories_rewound: Vec<String>,
+    },
     /// response from adding ingredients
     AddIngredients {
         /// all known ingredients
@@ -294,6 +297,16 @@ pub enum ExecuteAnswer {
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum QueryMsg {
+    /// display the eligibility for skulls to be rewound
+    RewindEligibility {
+        /// optional address and viewing key of a user
+        viewer: Option<ViewerInfo>,
+        /// optional permit used to verify user identity.  If both viewer and permit
+        /// are provided, the viewer will be ignored
+        permit: Option<Permit>,
+        /// list of token ids to check
+        token_ids: Vec<String>,
+    },
     /// displays the halt statuses for staking, crating, and alchemy
     HaltStatuses {},
     /// displays the staking, crating, transmute, and alchemy states
@@ -559,6 +572,22 @@ pub enum QueryAnswer {
         // rules
         potion_rules: Vec<DisplayPotionRules>,
     },
+    /// display the eligibility for skulls to be rewound
+    RewindEligibility {
+        /// rewind eligibility
+        rewind_eligibilities: Vec<RewindStatus>,
+    },
+}
+
+/// a skull id and its rewind eligibility status
+#[derive(Serialize, Deserialize, JsonSchema, Clone, PartialEq, Eq, Debug)]
+pub struct RewindStatus {
+    /// token_id of the skull
+    pub token_id: String,
+    /// if owned by querier, true/false if the skull can be rewound, null if not owned
+    pub can_rewind: Option<bool>,
+    /// if can_rewind is false, the reason for ineligibility
+    pub disqualification: Option<String>,
 }
 
 /// potion definition

@@ -91,6 +91,36 @@
       "additionalProperties": false
     },
     {
+      "description": "consume 3 ingredients to rewind the state of a skull if eligible",
+      "type": "object",
+      "required": [
+        "rewind"
+      ],
+      "properties": {
+        "rewind": {
+          "type": "object",
+          "required": [
+            "ingredients",
+            "token_id"
+          ],
+          "properties": {
+            "ingredients": {
+              "description": "the ingredients to consume",
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/IngredientQty"
+              }
+            },
+            "token_id": {
+              "description": "the token id of the skull to be rewound",
+              "type": "string"
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
       "description": "Create a viewing key",
       "type": "object",
       "required": [

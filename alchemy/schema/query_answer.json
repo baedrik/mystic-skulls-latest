@@ -570,6 +570,31 @@
         }
       },
       "additionalProperties": false
+    },
+    {
+      "description": "display the eligibility for skulls to be rewound",
+      "type": "object",
+      "required": [
+        "rewind_eligibility"
+      ],
+      "properties": {
+        "rewind_eligibility": {
+          "type": "object",
+          "required": [
+            "rewind_eligibilities"
+          ],
+          "properties": {
+            "rewind_eligibilities": {
+              "description": "rewind eligibility",
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/RewindStatus"
+              }
+            }
+          }
+        }
+      },
+      "additionalProperties": false
     }
   ],
   "definitions": {
@@ -995,6 +1020,33 @@
           "type": "integer",
           "format": "uint16",
           "minimum": 0.0
+        }
+      }
+    },
+    "RewindStatus": {
+      "description": "a skull id and its rewind eligibility status",
+      "type": "object",
+      "required": [
+        "token_id"
+      ],
+      "properties": {
+        "can_rewind": {
+          "description": "if owned by querier, true/false if the skull can be rewound, null if not owned",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "disqualification": {
+          "description": "if can_rewind is false, the reason for ineligibility",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "token_id": {
+          "description": "token_id of the skull",
+          "type": "string"
         }
       }
     },

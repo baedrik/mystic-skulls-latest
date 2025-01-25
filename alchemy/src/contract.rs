@@ -20,8 +20,8 @@ use crate::contract_info::{ContractInfo, StoreContractInfo};
 use crate::msg::{
     ChargeInfo, Dependencies, DisplayCrateState, DisplayPotionRules, EligibilityInfo,
     ExecuteAnswer, ExecuteMsg, IngrSetWeight, IngredientQty, IngredientSet, InstantiateMsg,
-    PotionStats, PotionWeight, QueryAnswer, QueryMsg, StakingTable, Testing, TraitWeight,
-    VariantIdxName, VariantList, ViewerInfo,
+    PotionStats, PotionWeight, QueryAnswer, QueryMsg, RewindStatus, StakingTable, Testing,
+    TraitWeight, VariantIdxName, VariantList, ViewerInfo,
 };
 use crate::server_msgs::{
     LayerNamesWrapper, ServeAlchemyWrapper, ServerQueryMsg, StoredDependencies,
@@ -200,6 +200,10 @@ pub fn execute(deps: DepsMut, env: Env, info: MessageInfo, msg: ExecuteMsg) -> S
     let response = match msg {
         ExecuteMsg::CreateViewingKey { entropy } => try_create_key(deps, &env, &info, &entropy),
         ExecuteMsg::SetViewingKey { key, .. } => try_set_key(deps, &info.sender, key),
+        ExecuteMsg::Rewind {
+            token_id,
+            ingredients,
+        } => try_rewind(deps, env, &info.sender, token_id, ingredients),
         ExecuteMsg::BrewPotion { ingredients } => try_brew(deps, info.sender, ingredients),
         ExecuteMsg::DisablePotions { by_name, by_index } => {
             try_toggle_potions(deps, &info.sender, by_name, by_index, true)
@@ -423,7 +427,6 @@ fn try_mint_crate(
     }
     let user_raw = deps.api.addr_canonicalize(sender.as_str())?;
     let user_key = user_raw.as_slice();
-    let mut updated_inventory: Vec<IngredientQty> = Vec::new();
     // get list of all ingredients and the user's inventory
     let (ingredients, mut raw_inv) = get_inventory(deps.storage, user_key)?;
     let ingr_cnt = ingredients.len();
@@ -449,16 +452,21 @@ fn try_mint_crate(
     let mut inv_store = PrefixedStorage::new(deps.storage, PREFIX_USER_INGR_INVENTORY);
     save(&mut inv_store, user_key, &raw_inv)?;
     let mut public_metadata: Metadata = load(deps.storage, CRATE_META_KEY)?;
-    let mut attrs: Vec<Trait> = Vec::new();
     // create traits for the crated ingredients
-    for (i, qty) in for_crate.into_iter().enumerate() {
-        if qty > 0 {
-            attrs.push(Trait {
-                trait_type: ingredients[i].clone(),
-                value: qty.to_string(),
-            });
-        }
-    }
+    let attrs = ingredients
+        .iter()
+        .zip(for_crate.iter())
+        .filter_map(|(ing, qty)| {
+            if *qty > 0 {
+                Some(Trait {
+                    trait_type: ing.clone(),
+                    value: qty.to_string(),
+                })
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<Trait>>();
     if attrs.is_empty() {
         return Err(StdError::generic_err(
             "You are trying to make an empty crate",
@@ -480,13 +488,14 @@ fn try_mint_crate(
     }
     .to_cosmos_msg(crate_contract.code_hash, crate_contract.address, None)?];
     // display what is left in the inventory
-    for (i, quantity) in raw_inv.into_iter().enumerate() {
-        updated_inventory.push(IngredientQty {
-            ingredient: ingredients[i].clone(),
+    let updated_inventory = ingredients
+        .into_iter()
+        .zip(raw_inv.into_iter())
+        .map(|(ingredient, quantity)| IngredientQty {
+            ingredient,
             quantity,
-        });
-    }
-
+        })
+        .collect::<Vec<IngredientQty>>();
     Ok(Response::new().add_messages(messages).set_data(to_binary(
         &ExecuteAnswer::CrateIngredients { updated_inventory },
     )?))
@@ -581,6 +590,94 @@ fn try_claim_stake(deps: DepsMut, env: Env, sender: &Addr) -> StdResult<Response
             rewards,
         })?),
     )
+}
+
+/// Returns StdResult<Response>
+///
+/// rewind a skull's image to its last state if possible
+///
+/// # Arguments
+///
+/// * `deps` - a mutable reference to Extern containing all the contract's external dependencies
+/// * `env` - the Env of contract's environment
+/// * `sender` - a reference to the message sender
+/// * `token_id` - skull to rewind
+/// * `spend` - list of ingredients to consume
+fn try_rewind(
+    deps: DepsMut,
+    env: Env,
+    sender: &Addr,
+    token_id: String,
+    spend: Vec<IngredientQty>,
+) -> StdResult<Response> {
+    // check if the message sender owns the skull
+    let (mut id_images, _, skull_contract) = verify_ownership(
+        deps.as_ref(),
+        sender.as_str(),
+        vec![token_id],
+        env.contract.address.to_string(),
+    )?;
+    let mut id_image = id_images
+        .pop()
+        .ok_or_else(|| StdError::generic_err("You do not own that skull"))?;
+    let user_raw = deps.api.addr_canonicalize(sender.as_str())?;
+    let user_key = user_raw.as_slice();
+    let mut total = 0u32;
+    // get the ingredient list and the user's inventory
+    let (ingredients, mut raw_inv) = get_inventory(deps.storage, user_key)?;
+    for ing_qty in spend.into_iter() {
+        if let Some(pos) = ingredients.iter().position(|i| *i == ing_qty.ingredient) {
+            if raw_inv[pos] < ing_qty.quantity {
+                return Err(StdError::generic_err(format!(
+                    "You do not have {} {}",
+                    ing_qty.quantity, ing_qty.ingredient
+                )));
+            }
+            raw_inv[pos] -= ing_qty.quantity;
+            total += ing_qty.quantity;
+        } else {
+            return Err(StdError::generic_err(format!(
+                "{} is not a known ingredient",
+                ing_qty.ingredient
+            )));
+        }
+    }
+    if total != 3 {
+        return Err(StdError::generic_err(
+            "You must spend exactly 3 ingredients to do a rewind",
+        ));
+    }
+    let mut inv_store = PrefixedStorage::new(deps.storage, PREFIX_USER_INGR_INVENTORY);
+    save(&mut inv_store, user_key, &raw_inv)?;
+    // check rewind eligibility
+    if let Some(err) = can_rewind(&id_image.image) {
+        return Err(StdError::generic_err(err));
+    }
+    let old = id_image.image.current;
+    id_image.image.current = id_image.image.previous.clone();
+    let trn_st: TransmuteState = load(deps.storage, TRANSMUTE_STATE_KEY)?;
+    let cats = may_load::<Vec<String>>(deps.storage, CATEGORIES_KEY)?.unwrap_or_default();
+    let zipped_image = id_image.image.current.iter().zip(old.iter());
+    let categories_rewound = cats
+        .into_iter()
+        .enumerate()
+        .zip(zipped_image)
+        .filter_map(|((i, s), (c, o))| {
+            if *c != *o && !trn_st.skip.contains(&(i as u8)) {
+                Some(s)
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<String>>();
+    let messages = vec![Snip721HandleMsg::SetImageInfo {
+        token_id: id_image.id,
+        image_info: id_image.image,
+    }
+    .to_cosmos_msg(skull_contract.code_hash, skull_contract.address, None)?];
+    Ok(Response::new()
+        .add_messages(messages)
+        .set_data(to_binary(&ExecuteAnswer::Rewind { categories_rewound })?))
 }
 
 /// Returns StdResult<Response>
@@ -1629,6 +1726,11 @@ pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
             permit,
             token_ids,
         } => query_token_bonus(deps, env, viewer, permit, token_ids),
+        QueryMsg::RewindEligibility {
+            viewer,
+            permit,
+            token_ids,
+        } => query_rewind(deps, env, viewer, permit, token_ids),
         QueryMsg::Materials { viewer, permit } => {
             query_mater(deps, viewer, permit, &env.contract.address)
         }
@@ -2135,6 +2237,58 @@ fn query_token_bonus(
     to_binary(&QueryAnswer::TokensEligibleForBonus {
         user_is_eligible,
         token_eligibility,
+    })
+}
+
+/// Returns StdResult<Binary> displaying information regarding a list of skulls' rewind
+/// eligibility
+///
+/// # Arguments
+///
+/// * `deps` - reference to Extern containing all the contract's external dependencies
+/// * `env` - Env of contract's environment
+/// * `viewer` - optional address and key making an authenticated query request
+/// * `permit` - optional permit with "owner" permission
+/// * `token_ids` - list of tokens to check
+fn query_rewind(
+    deps: Deps,
+    env: Env,
+    viewer: Option<ViewerInfo>,
+    permit: Option<Permit>,
+    token_ids: Vec<String>,
+) -> StdResult<Binary> {
+    let (_, user_hmn) = get_querier(deps, viewer, permit, &env.contract.address)?;
+    let (id_images, _, _) = verify_ownership(
+        deps,
+        &user_hmn,
+        token_ids.clone(),
+        env.contract.address.into_string(),
+    )?;
+    let rewind_eligibilities = token_ids
+        .into_iter()
+        .map(|id| {
+            let (can_rewind, disqualification) =
+                if let Some(id_image) = id_images.iter().find(|idi| idi.id == id) {
+                    // is the owner
+                    if let Some(err) = can_rewind(&id_image.image) {
+                        (Some(false), Some(err))
+                    } else {
+                        (Some(true), None)
+                    }
+                } else {
+                    // not the owner
+                    (None, None)
+                };
+            RewindStatus {
+                token_id: id,
+                can_rewind,
+                disqualification,
+            }
+        })
+        .collect::<Vec<RewindStatus>>();
+
+    to_binary(&QueryAnswer::RewindEligibility {
+        rewind_eligibilities,
     })
 }
 
@@ -2725,7 +2879,6 @@ fn process_charges(
     quantities: &[u8],
     user_key: &[u8],
 ) -> StdResult<Vec<IngredientQty>> {
-    let mut rewards: Vec<IngredientQty> = Vec::new();
     // get ingredient list and user's inventory
     let (ingredients, mut raw_inv) = get_inventory(storage, user_key)?;
     let ingr_cnt = ingredients.len();
@@ -2738,15 +2891,20 @@ fn process_charges(
     let mut inv_store = PrefixedStorage::new(storage, PREFIX_USER_INGR_INVENTORY);
     save(&mut inv_store, user_key, &raw_inv)?;
     // create the list of generated resources for the output
-    for (i, quantity) in generated.into_iter().enumerate() {
-        if quantity > 0 {
-            rewards.push(IngredientQty {
-                ingredient: ingredients[i].clone(),
-                quantity,
-            });
-        }
-    }
-    Ok(rewards)
+    Ok(ingredients
+        .into_iter()
+        .zip(generated.into_iter())
+        .filter_map(|(ingredient, quantity)| {
+            if quantity > 0 {
+                Some(IngredientQty {
+                    ingredient,
+                    quantity,
+                })
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<IngredientQty>>())
 }
 
 /// Returns StdResult<Vec<IngredientQty>>
@@ -2758,17 +2916,17 @@ fn process_charges(
 /// * `storage` - a reference to this contract's storage
 /// * `user_key` - user address storage key
 fn display_inventory(storage: &dyn Storage, user_key: &[u8]) -> StdResult<Vec<IngredientQty>> {
-    let mut inventory: Vec<IngredientQty> = Vec::new();
     // get the ingredient list and the user's inventory
     let (ingredients, raw_inv) = get_inventory(storage, user_key)?;
     // create the readable list of ingredients
-    for (i, quantity) in raw_inv.into_iter().enumerate() {
-        inventory.push(IngredientQty {
-            ingredient: ingredients[i].clone(),
+    Ok(ingredients
+        .into_iter()
+        .zip(raw_inv.into_iter())
+        .map(|(ingredient, quantity)| IngredientQty {
+            ingredient,
             quantity,
-        });
-    }
-    Ok(inventory)
+        })
+        .collect::<Vec<IngredientQty>>())
 }
 
 /// Returns StdResult<(Vec<String>, Vec<u32>)>
@@ -2852,8 +3010,10 @@ fn uncrate(
         }
     }
     // create logs for each ingredient added
-    for (i, qty) in added.iter().enumerate() {
-        resp = resp.add_attribute(ingredients[i].clone(), qty.to_string());
+    for (ing, qty) in ingredients.into_iter().zip(added.iter()) {
+        if *qty > 0 {
+            resp = resp.add_attribute(ing, qty.to_string());
+        }
     }
     let mut inv_store = PrefixedStorage::new(deps.storage, PREFIX_USER_INGR_INVENTORY);
     save(&mut inv_store, user_key, &raw_inv)?;
@@ -3012,13 +3172,14 @@ fn rcv_potion(
         }
         // get categories that have changed
         let categories = may_load::<Vec<String>>(deps.storage, CATEGORIES_KEY)?.unwrap_or_default();
+        let zipped_image = id_image.image.current.iter().zip(old_image.iter());
         let changed = categories
             .into_iter()
             .enumerate()
-            .filter_map(|(i, c)| {
-                if (old_image[i] != id_image.image.current[i]) && !trn_st.skip.contains(&(i as u8))
-                {
-                    Some(c)
+            .zip(zipped_image)
+            .filter_map(|((i, s), (c, o))| {
+                if *c != *o && !trn_st.skip.contains(&(i as u8)) {
+                    Some(s)
                 } else {
                     None
                 }
@@ -3057,8 +3218,10 @@ fn rcv_potion(
     } else {
         // distilled a potion
         // create logs for each ingredient added
-        for (i, qty) in added_inv.iter().enumerate() {
-            resp = resp.add_attribute(ingredients[i].clone(), qty.to_string());
+        for (ing, qty) in ingredients.into_iter().zip(added_inv.iter()) {
+            if *qty > 0 {
+                resp = resp.add_attribute(ing, qty.to_string());
+            }
         }
     }
     Ok(resp)
@@ -3353,12 +3516,31 @@ fn derive_name(
     if keywords.is_empty() {
         *keywords = may_load::<Vec<Vec<String>>>(storage, NAME_KEYWORD_KEY)?.unwrap_or_default();
     }
-    Ok(indices
-        .iter()
-        .enumerate()
-        .map(|(i, idx)| (keywords[i][*idx as usize]).as_str())
+    let zipped = indices.iter().zip(keywords.iter());
+
+    Ok(zipped
+        .map(|(u, list)| (list[*u as usize]).as_str())
         .collect::<Vec<&str>>()
         .join(" "))
+}
+
+/// Returns Option<String>
+///
+/// checks if a skull is eligible for rewind
+///
+/// # Arguments
+///
+/// * `image` - ImageInfo of the skull attempting to rewind
+fn can_rewind(image: &ImageInfo) -> Option<String> {
+    if image.current.iter().any(|u| *u == 255) {
+        Some("Only fully revealed skulls may be rewound".to_string())
+    } else if image.previous.iter().any(|u| *u == 255) {
+        Some("Skulls can not be rewound to an unrevealed state".to_string())
+    } else if image.current == image.previous {
+        Some("This skull has been rewound as far as it can".to_string())
+    } else {
+        None
+    }
 }
 
 ///////////////////////////////////// Migrate //////////////////////////////////////
