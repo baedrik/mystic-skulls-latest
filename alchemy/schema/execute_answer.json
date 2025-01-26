@@ -4,6 +4,30 @@
   "description": "Responses from handle functions",
   "oneOf": [
     {
+      "description": "response from adding or deleting potion images",
+      "type": "object",
+      "required": [
+        "potion_images"
+      ],
+      "properties": {
+        "potion_images": {
+          "type": "object",
+          "required": [
+            "unassigned_images"
+          ],
+          "properties": {
+            "unassigned_images": {
+              "description": "total count of unassigned potion images",
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0.0
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
       "description": "response from creating a viewing key",
       "type": "object",
       "required": [

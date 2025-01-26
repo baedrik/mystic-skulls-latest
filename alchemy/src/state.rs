@@ -61,12 +61,16 @@ pub const PREFIX_RECIPES_BY_LEN: &[u8] = b"rcpln";
 pub const PREFIX_RECIPE_2_NAME: &[u8] = b"r2nm";
 /// storage prefix for whether a potion has been discovered
 pub const PREFIX_POTION_FOUND: &[u8] = b"found";
-/// storage prefix for potion NFT descriptions
-pub const PREFIX_POTION_DESC: &[u8] = b"desc";
+/// storage prefix for potion NFT images and descriptions
+pub const PREFIX_POTION_META_ADD: &[u8] = b"desc";
 /// storage key for this contract's viewing key with other contracts
 pub const MY_VIEWING_KEY: &[u8] = b"myview";
 /// prefix for the storage of staking tables
 pub const PREFIX_STAKING_TABLE: &[u8] = b"tbstk";
+/// prefix for the storage of potion images
+pub const PREFIX_POTION_IMAGE: &[u8] = b"imgpt";
+/// prefix for pool of unassigned potion image keys
+pub const PREFIX_IMAGE_POOL: &[u8] = b"pool";
 /// prefix for the storage of revoked permits
 pub const PREFIX_REVOKED_PERMITS: &str = "revoke";
 
@@ -289,6 +293,10 @@ pub struct AlchemyState {
     pub potion_cnt: u16,
     /// number of potions discovered
     pub found_cnt: u16,
+    /// total number of potion images
+    pub ptn_img_total: u16,
+    /// count of unassigned potion images
+    pub img_pool_cnt: u16,
 }
 
 /// a recipe and the index of the potion it creates
@@ -298,4 +306,13 @@ pub struct RecipeIdx {
     pub recipe: Vec<u8>,
     /// index of the potion this creates
     pub idx: u16,
+}
+
+/// the image key and optional description postscript for potion nfts
+#[derive(Serialize, Deserialize)]
+pub struct MetaAdd {
+    /// potion image key
+    pub image: u16,
+    /// optional description postscript
+    pub desc: Option<String>,
 }

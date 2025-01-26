@@ -595,6 +595,38 @@
         }
       },
       "additionalProperties": false
+    },
+    {
+      "description": "displays the unassigned potion images",
+      "type": "object",
+      "required": [
+        "image_pool"
+      ],
+      "properties": {
+        "image_pool": {
+          "type": "object",
+          "required": [
+            "count",
+            "potion_images"
+          ],
+          "properties": {
+            "count": {
+              "description": "number of unassigned potion images",
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0.0
+            },
+            "potion_images": {
+              "description": "potion images",
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/IdxImage"
+              }
+            }
+          }
+        }
+      },
+      "additionalProperties": false
     }
   ],
   "definitions": {
@@ -609,7 +641,9 @@
         "disabled",
         "found_cnt",
         "halt",
-        "potion_cnt"
+        "img_pool_cnt",
+        "potion_cnt",
+        "ptn_img_total"
       ],
       "properties": {
         "disabled": {
@@ -631,8 +665,20 @@
           "description": "true if alchemy is halted",
           "type": "boolean"
         },
+        "img_pool_cnt": {
+          "description": "count of unassigned potion images",
+          "type": "integer",
+          "format": "uint16",
+          "minimum": 0.0
+        },
         "potion_cnt": {
           "description": "number of defined potions",
+          "type": "integer",
+          "format": "uint16",
+          "minimum": 0.0
+        },
+        "ptn_img_total": {
+          "description": "total number of potion images",
           "type": "integer",
           "format": "uint16",
           "minimum": 0.0
@@ -905,6 +951,26 @@
         }
       }
     },
+    "IdxImage": {
+      "description": "a potion image and its index in the unassigned pool",
+      "type": "object",
+      "required": [
+        "idx",
+        "image"
+      ],
+      "properties": {
+        "idx": {
+          "description": "index of the potion image",
+          "type": "integer",
+          "format": "uint16",
+          "minimum": 0.0
+        },
+        "image": {
+          "description": "potion image",
+          "type": "string"
+        }
+      }
+    },
     "IngrSetWeight": {
       "description": "ingredient sets and their staking weight",
       "type": "object",
@@ -1124,12 +1190,19 @@
       "type": "object",
       "required": [
         "found",
+        "image_key",
         "recipe"
       ],
       "properties": {
         "found": {
           "description": "true if this potion has been discovered",
           "type": "boolean"
+        },
+        "image_key": {
+          "description": "this potion's image key",
+          "type": "integer",
+          "format": "uint16",
+          "minimum": 0.0
         },
         "recipe": {
           "description": "this potion's recipe",

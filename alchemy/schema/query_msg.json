@@ -726,6 +726,61 @@
         }
       },
       "additionalProperties": false
+    },
+    {
+      "description": "displays the unassigned potion images",
+      "type": "object",
+      "required": [
+        "image_pool"
+      ],
+      "properties": {
+        "image_pool": {
+          "type": "object",
+          "properties": {
+            "page": {
+              "description": "optional page number to display.  Defaults to 0 (first page) if not provided",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint16",
+              "minimum": 0.0
+            },
+            "page_size": {
+              "description": "optional limit to the number of images to show.  Defaults to 10 if not specified",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint16",
+              "minimum": 0.0
+            },
+            "permit": {
+              "description": "optional permit used to verify admin identity.  If both viewer and permit are provided, the viewer will be ignored",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Permit_for_TokenPermissions"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "viewer": {
+              "description": "optional address and viewing key of an admin",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/ViewerInfo"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "additionalProperties": false
     }
   ],
   "definitions": {

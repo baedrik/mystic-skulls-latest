@@ -4,6 +4,58 @@
   "description": "Handle messages",
   "oneOf": [
     {
+      "description": "add potion images",
+      "type": "object",
+      "required": [
+        "add_potion_images"
+      ],
+      "properties": {
+        "add_potion_images": {
+          "type": "object",
+          "required": [
+            "images"
+          ],
+          "properties": {
+            "images": {
+              "description": "potion svg images",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "delete unassigned potion images",
+      "type": "object",
+      "required": [
+        "delete_potion_images"
+      ],
+      "properties": {
+        "delete_potion_images": {
+          "type": "object",
+          "required": [
+            "indices"
+          ],
+          "properties": {
+            "indices": {
+              "description": "image pool indices of images to remove",
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0.0
+              }
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
       "description": "try to brew a potion",
       "type": "object",
       "required": [

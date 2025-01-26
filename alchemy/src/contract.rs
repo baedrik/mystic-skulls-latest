@@ -19,9 +19,9 @@ use secret_toolkit::{
 use crate::contract_info::{ContractInfo, StoreContractInfo};
 use crate::msg::{
     ChargeInfo, Dependencies, DisplayCrateState, DisplayPotionRules, EligibilityInfo,
-    ExecuteAnswer, ExecuteMsg, IngrSetWeight, IngredientQty, IngredientSet, InstantiateMsg,
-    PotionStats, PotionWeight, QueryAnswer, QueryMsg, RewindStatus, StakingTable, Testing,
-    TraitWeight, VariantIdxName, VariantList, ViewerInfo,
+    ExecuteAnswer, ExecuteMsg, IdxImage, IngrSetWeight, IngredientQty, IngredientSet,
+    InstantiateMsg, PotionStats, PotionWeight, QueryAnswer, QueryMsg, RewindStatus, StakingTable,
+    Testing, TraitWeight, VariantIdxName, VariantList, ViewerInfo,
 };
 use crate::server_msgs::{
     LayerNamesWrapper, ServeAlchemyWrapper, ServerQueryMsg, StoredDependencies,
@@ -31,16 +31,16 @@ use crate::snip721::{
     Snip721HandleMsg, Snip721QueryMsg, Trait,
 };
 use crate::state::{
-    AlchemyState, CrateState, RecipeIdx, SkullStakeInfo, StakingState, StoredIngrSet,
+    AlchemyState, CrateState, MetaAdd, RecipeIdx, SkullStakeInfo, StakingState, StoredIngrSet,
     StoredLayerId, StoredPotionRules, StoredSetWeight, StoredTraitWeight, StoredVariantList,
     TransmuteState, Weighted, ADMINS_KEY, ALCHEMY_STATE_KEY, CATEGORIES_KEY, CONSUMED_KEY,
     CRATES_KEY, CRATE_META_KEY, CRATE_STATE_KEY, DEPENDENCIES_KEY, INGREDIENTS_KEY,
     INGRED_SETS_KEY, MATERIALS_KEY, MY_VIEWING_KEY, NAME_KEYWORD_KEY, POTION_721_KEY,
-    POTION_META_KEY, PREFIX_NAME_2_POTION_IDX, PREFIX_POTION_DESC, PREFIX_POTION_FOUND,
-    PREFIX_POTION_IDX_2_RECIPE, PREFIX_POTION_RULES, PREFIX_RECIPES_BY_LEN, PREFIX_RECIPE_2_NAME,
-    PREFIX_REVOKED_PERMITS, PREFIX_SKULL_STAKE, PREFIX_STAKING_TABLE, PREFIX_USER_INGR_INVENTORY,
-    PREFIX_USER_STAKE, PREFIX_VARIANTS, SKULL_721_KEY, STAKING_STATE_KEY, SVG_SERVER_KEY,
-    TRANSMUTE_STATE_KEY,
+    POTION_META_KEY, PREFIX_IMAGE_POOL, PREFIX_NAME_2_POTION_IDX, PREFIX_POTION_FOUND,
+    PREFIX_POTION_IDX_2_RECIPE, PREFIX_POTION_IMAGE, PREFIX_POTION_META_ADD, PREFIX_POTION_RULES,
+    PREFIX_RECIPES_BY_LEN, PREFIX_RECIPE_2_NAME, PREFIX_REVOKED_PERMITS, PREFIX_SKULL_STAKE,
+    PREFIX_STAKING_TABLE, PREFIX_USER_INGR_INVENTORY, PREFIX_USER_STAKE, PREFIX_VARIANTS,
+    SKULL_721_KEY, STAKING_STATE_KEY, SVG_SERVER_KEY, TRANSMUTE_STATE_KEY,
 };
 use crate::storage::{load, may_load, save};
 
@@ -133,6 +133,8 @@ pub fn instantiate(
         potion_cnt: 0,
         found_cnt: 0,
         disabled: Vec::new(),
+        ptn_img_total: 0,
+        img_pool_cnt: 0,
     };
     save(deps.storage, ALCHEMY_STATE_KEY, &alc_st)?;
     let trn_st = TransmuteState {
@@ -232,6 +234,8 @@ pub fn execute(deps: DepsMut, env: Env, info: MessageInfo, msg: ExecuteMsg) -> S
             try_add_ingredients(deps, &info.sender, ingredients)
         }
         ExecuteMsg::SetStakingTables { tables } => try_stake_tbl(deps, &info.sender, tables),
+        ExecuteMsg::AddPotionImages { images } => try_add_image(deps, &info.sender, images),
+        ExecuteMsg::DeletePotionImages { indices } => try_del_image(deps, &info.sender, indices),
         ExecuteMsg::DefineIngredientSets { sets } => try_set_ingred_set(deps, &info.sender, sets),
         ExecuteMsg::SetHaltStatus {
             staking,
@@ -348,10 +352,16 @@ fn try_brew(deps: DepsMut, sender: Addr, recipe: Vec<String>) -> StdResult<Respo
             let mut public_metadata: Metadata = load(deps.storage, POTION_META_KEY)?;
             let potion_name = derive_name(deps.storage, name_key, &mut Vec::new())?;
             public_metadata.extension.name = Some(potion_name.clone());
-            let desc_store = ReadonlyPrefixedStorage::new(deps.storage, PREFIX_POTION_DESC);
-            if let Some(addition) = may_load::<String>(&desc_store, &idx_key)? {
+            let add_store = ReadonlyPrefixedStorage::new(deps.storage, PREFIX_POTION_META_ADD);
+            let meta_add = may_load::<MetaAdd>(&add_store, &idx_key)?
+                .ok_or_else(|| StdError::generic_err("MetaAdd storage is corrupt"))?;
+            let image_store = ReadonlyPrefixedStorage::new(deps.storage, PREFIX_POTION_IMAGE);
+            let image = may_load::<String>(&image_store, &meta_add.image.to_le_bytes())?
+                .ok_or_else(|| StdError::generic_err("Potion image storage is corrupt"))?;
+            public_metadata.extension.image_data = Some(image);
+            if let Some(addition) = meta_add.desc {
                 public_metadata.extension.description = Some(format!(
-                    "{}\n{}",
+                    "{}\n\n{}",
                     public_metadata.extension.description.ok_or_else(|| {
                         StdError::generic_err("Potion metadata is missing Description")
                     })?,
@@ -942,6 +952,24 @@ fn try_define_potions(
             not_unique = may_load::<u16>(&idx_store, encoded.as_slice())?.is_some();
         }
         save(&mut idx_store, encoded.as_slice(), &alc_st.potion_cnt)?;
+        // pick a random potion image
+        if alc_st.img_pool_cnt == 0 {
+            return Err(StdError::generic_err(
+                "There are no unassigned potion images",
+            ));
+        }
+        let pool_idx = (prng.next_u64() % alc_st.img_pool_cnt as u64) as u16;
+        let pool_key = pool_idx.to_le_bytes();
+        alc_st.img_pool_cnt -= 1;
+        let mut pool_store = PrefixedStorage::new(deps.storage, PREFIX_IMAGE_POOL);
+        let image = may_load::<u16>(&pool_store, &pool_key)?
+            .ok_or_else(|| StdError::generic_err("Potion image pool keys are corrupt"))?;
+        // if picked the last key, we're done
+        if pool_idx != alc_st.img_pool_cnt {
+            let last = may_load::<u16>(&pool_store, &alc_st.img_pool_cnt.to_le_bytes())?
+                .ok_or_else(|| StdError::generic_err("Potion image pool keys are corrupt"))?;
+            save(&mut pool_store, &pool_key, &last)?;
+        }
         let rule = StoredPotionRules {
             normal_weights: potion
                 .normal_weights
@@ -976,11 +1004,13 @@ fn try_define_potions(
         let idx_key = alc_st.potion_cnt.to_le_bytes();
         let mut rul_store = PrefixedStorage::new(deps.storage, PREFIX_POTION_RULES);
         save(&mut rul_store, &idx_key, &rule)?;
-        // save the description postscript if applicable
-        if let Some(ps) = potion.description_postscript {
-            let mut descr_store = PrefixedStorage::new(deps.storage, PREFIX_POTION_DESC);
-            save(&mut descr_store, &idx_key, &ps)?;
-        }
+        // save the image key and optional description postscript
+        let meta_add = MetaAdd {
+            image,
+            desc: potion.description_postscript,
+        };
+        let mut add_store = PrefixedStorage::new(deps.storage, PREFIX_POTION_META_ADD);
+        save(&mut add_store, &idx_key, &meta_add)?;
 
         alc_st.potion_cnt = alc_st.potion_cnt.checked_add(1).ok_or_else(|| {
             StdError::generic_err("Reached implementation limit for potion definition")
@@ -1389,6 +1419,85 @@ fn try_stake_tbl(deps: DepsMut, sender: &Addr, tables: Vec<StakingTable>) -> Std
 
 /// Returns StdResult<Response>
 ///
+/// add potion images
+///
+/// # Arguments
+///
+/// * `deps` - a mutable reference to Extern containing all the contract's external dependencies
+/// * `sender` - a reference to the message sender
+/// * `images` - list of potion image svgs to add
+fn try_add_image(deps: DepsMut, sender: &Addr, images: Vec<String>) -> StdResult<Response> {
+    // only allow admins to do this
+    check_admin_tx(deps.as_ref(), sender)?;
+    let mut alc_st: AlchemyState = load(deps.storage, ALCHEMY_STATE_KEY)?;
+    for img in images.into_iter() {
+        let mut img_store = PrefixedStorage::new(deps.storage, PREFIX_POTION_IMAGE);
+        save(&mut img_store, &alc_st.ptn_img_total.to_le_bytes(), &img)?;
+        let mut pool_store = PrefixedStorage::new(deps.storage, PREFIX_IMAGE_POOL);
+        save(
+            &mut pool_store,
+            &alc_st.img_pool_cnt.to_le_bytes(),
+            &alc_st.ptn_img_total,
+        )?;
+        alc_st.ptn_img_total = alc_st.ptn_img_total.checked_add(1).ok_or_else(|| {
+            StdError::generic_err("Reached implementation limit for potion images")
+        })?;
+        // don't need to check overflow because this will never be greater than the total
+        alc_st.img_pool_cnt += 1;
+    }
+    save(deps.storage, ALCHEMY_STATE_KEY, &alc_st)?;
+    Ok(
+        Response::new().set_data(to_binary(&ExecuteAnswer::PotionImages {
+            unassigned_images: alc_st.img_pool_cnt,
+        })?),
+    )
+}
+
+/// Returns StdResult<Response>
+///
+/// delete unassigned potion images
+///
+/// # Arguments
+///
+/// * `deps` - a mutable reference to Extern containing all the contract's external dependencies
+/// * `sender` - a reference to the message sender
+/// * `indices` - list of potion image indices to delete
+fn try_del_image(deps: DepsMut, sender: &Addr, mut indices: Vec<u16>) -> StdResult<Response> {
+    // only allow admins to do this
+    check_admin_tx(deps.as_ref(), sender)?;
+    let mut alc_st: AlchemyState = load(deps.storage, ALCHEMY_STATE_KEY)?;
+    // sort the indices in descending order an remove duplicates so subsequent deletes are not
+    // affected
+    indices.sort_by(|a, b| b.cmp(a));
+    indices.dedup();
+    let mut pool_store = PrefixedStorage::new(deps.storage, PREFIX_IMAGE_POOL);
+    for idx in indices.into_iter() {
+        if idx >= alc_st.img_pool_cnt {
+            return Err(StdError::generic_err("Index out of bounds"));
+        }
+        alc_st.img_pool_cnt = alc_st
+            .img_pool_cnt
+            .checked_sub(1)
+            .ok_or_else(|| StdError::generic_err("There are no images in the potion image pool"))?;
+        // if deleting the last one, we're done
+        if idx != alc_st.img_pool_cnt {
+            // get the last image key
+            let last = may_load::<u16>(&pool_store, &alc_st.img_pool_cnt.to_le_bytes())?
+                .ok_or_else(|| StdError::generic_err("Potion image key pool storage is corrupt"))?;
+            // replace the deleted image index
+            save(&mut pool_store, &idx.to_le_bytes(), &last)?;
+        }
+    }
+    save(deps.storage, ALCHEMY_STATE_KEY, &alc_st)?;
+    Ok(
+        Response::new().set_data(to_binary(&ExecuteAnswer::PotionImages {
+            unassigned_images: alc_st.img_pool_cnt,
+        })?),
+    )
+}
+
+/// Returns StdResult<Response>
+///
 /// define ingredients sets for staking tables
 ///
 /// # Arguments
@@ -1781,6 +1890,12 @@ pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
             page,
             page_size,
         } => query_rules(deps, viewer, permit, page, page_size, &env.contract.address),
+        QueryMsg::ImagePool {
+            viewer,
+            permit,
+            page,
+            page_size,
+        } => query_pool(deps, viewer, permit, page, page_size, &env.contract.address),
         QueryMsg::MintingMetadata { viewer, permit } => {
             query_meta(deps, viewer, permit, &env.contract.address)
         }
@@ -1823,7 +1938,7 @@ fn query_rules(
     let mut vars = vec![Vec::new(); cat_cnt];
     let rul_store = ReadonlyPrefixedStorage::new(deps.storage, PREFIX_POTION_RULES);
     let p2r_store = ReadonlyPrefixedStorage::new(deps.storage, PREFIX_POTION_IDX_2_RECIPE);
-    let descr_store = ReadonlyPrefixedStorage::new(deps.storage, PREFIX_POTION_DESC);
+    let add_store = ReadonlyPrefixedStorage::new(deps.storage, PREFIX_POTION_META_ADD);
     let mut potion_rules = Vec::new();
 
     // TODO remove
@@ -1834,6 +1949,9 @@ fn query_rules(
         let is_disabled = alc_st.disabled.contains(&idx);
         let ptn_key = idx.to_le_bytes();
         if let Some(rules) = may_load::<StoredPotionRules>(&rul_store, &ptn_key)? {
+            let meta_add = may_load::<MetaAdd>(&add_store, &ptn_key)?.ok_or_else(|| {
+                StdError::generic_err("Additional potion metadata storage is corrupt")
+            })?;
             // check if a recipe was generated
             // TODO let has_recipe = may_load::<Vec<u8>>(&p2r_store, &ptn_key)?.is_some();
 
@@ -1849,7 +1967,11 @@ fn query_rules(
                 } else {
                     (false, Vec::new(), false)
                 };
-            let testing = Testing { found, recipe };
+            let testing = Testing {
+                found,
+                recipe,
+                image_key: meta_add.image,
+            };
 
             potion_rules.push(DisplayPotionRules {
                 potion_idx: idx,
@@ -1874,7 +1996,7 @@ fn query_rules(
                     .iter()
                     .map(|l| l.to_display(deps.storage, &categories, &mut vars))
                     .collect::<StdResult<Vec<VariantList>>>()?,
-                description_postscript: may_load::<String>(&descr_store, &ptn_key)?,
+                description_postscript: meta_add.desc,
                 is_addition_potion: rules.is_add,
                 do_all_listed_potions: rules.do_all,
                 dye_style: rules.dye_style,
@@ -1889,6 +2011,48 @@ fn query_rules(
     to_binary(&QueryAnswer::PotionRules {
         count: alc_st.potion_cnt,
         potion_rules,
+    })
+}
+
+/// Returns StdResult<Binary> displaying unassigned potion images
+///
+/// # Arguments
+///
+/// * `deps` - reference to Extern containing all the contract's external dependencies
+/// * `viewer` - optional address and key making an authenticated query request
+/// * `permit` - optional permit with "owner" permission
+/// * `page` - optional page to display
+/// * `page_size` - optional number of images to display
+/// * `my_addr` - a reference to this contract's address
+fn query_pool(
+    deps: Deps,
+    viewer: Option<ViewerInfo>,
+    permit: Option<Permit>,
+    page: Option<u16>,
+    page_size: Option<u16>,
+    my_addr: &Addr,
+) -> StdResult<Binary> {
+    // only allow admins to do this
+    check_admin_query(deps, viewer, permit, my_addr)?;
+    let pool_store = ReadonlyPrefixedStorage::new(deps.storage, PREFIX_IMAGE_POOL);
+    let img_store = ReadonlyPrefixedStorage::new(deps.storage, PREFIX_POTION_IMAGE);
+    let alc_st: AlchemyState = load(deps.storage, ALCHEMY_STATE_KEY)?;
+    let page = page.unwrap_or(0);
+    let limit = page_size.unwrap_or(10);
+    let start = page * limit;
+    let end = min(start + limit, alc_st.img_pool_cnt);
+    let mut potion_images = Vec::new();
+    for idx in start..end {
+        if let Some(img_key) = may_load::<u16>(&pool_store, &idx.to_le_bytes())? {
+            if let Some(image) = may_load::<String>(&img_store, &img_key.to_le_bytes())? {
+                potion_images.push(IdxImage { idx, image });
+            }
+        }
+    }
+
+    to_binary(&QueryAnswer::ImagePool {
+        count: alc_st.img_pool_cnt,
+        potion_images,
     })
 }
 
@@ -3599,6 +3763,8 @@ pub fn migrate(deps: DepsMut, env: Env, _msg: Empty) -> StdResult<Response> {
         potion_cnt: 0,
         found_cnt: 0,
         disabled: Vec::new(),
+        ptn_img_total: 0,
+        img_pool_cnt: 0,
     };
     save(deps.storage, ALCHEMY_STATE_KEY, &new_st)?;
     // init the transmutation state

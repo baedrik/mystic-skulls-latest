@@ -34,6 +34,16 @@ pub struct InstantiateMsg {
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ExecuteMsg {
+    /// add potion images
+    AddPotionImages {
+        /// potion svg images
+        images: Vec<String>,
+    },
+    /// delete unassigned potion images
+    DeletePotionImages {
+        /// image pool indices of images to remove
+        indices: Vec<u16>,
+    },
     /// try to brew a potion
     BrewPotion {
         /// list of order sensitive potion ingredients
@@ -177,6 +187,11 @@ pub enum ExecuteMsg {
 #[derive(Serialize, Deserialize, Debug, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ExecuteAnswer {
+    /// response from adding or deleting potion images
+    PotionImages {
+        /// total count of unassigned potion images
+        unassigned_images: u16,
+    },
     /// response from creating a viewing key
     ViewingKey { key: String },
     /// response from adding/removing admins
@@ -454,6 +469,18 @@ pub enum QueryMsg {
         /// optional limit to the number of dependencies to show.  Defaults to 30 if not specified
         page_size: Option<u16>,
     },
+    /// displays the unassigned potion images
+    ImagePool {
+        /// optional address and viewing key of an admin
+        viewer: Option<ViewerInfo>,
+        /// optional permit used to verify admin identity.  If both viewer and permit
+        /// are provided, the viewer will be ignored
+        permit: Option<Permit>,
+        /// optional page number to display.  Defaults to 0 (first page) if not provided
+        page: Option<u16>,
+        /// optional limit to the number of images to show.  Defaults to 10 if not specified
+        page_size: Option<u16>,
+    },
 }
 
 /// responses to queries
@@ -576,6 +603,13 @@ pub enum QueryAnswer {
     RewindEligibility {
         /// rewind eligibility
         rewind_eligibilities: Vec<RewindStatus>,
+    },
+    /// displays the unassigned potion images
+    ImagePool {
+        /// number of unassigned potion images
+        count: u16,
+        /// potion images
+        potion_images: Vec<IdxImage>,
     },
 }
 
@@ -864,6 +898,15 @@ pub struct VariantIdxName {
     pub name: String,
 }
 
+/// a potion image and its index in the unassigned pool
+#[derive(Serialize, Deserialize, JsonSchema, Clone, PartialEq, Eq, Debug)]
+pub struct IdxImage {
+    /// index of the potion image
+    pub idx: u16,
+    /// potion image
+    pub image: String,
+}
+
 /// describes a trait that has multiple layers
 #[derive(Serialize, Deserialize, JsonSchema, Clone, PartialEq, Eq, Debug)]
 pub struct Dependencies {
@@ -898,4 +941,6 @@ pub struct Testing {
     pub found: bool,
     /// this potion's recipe
     pub recipe: Vec<String>,
+    /// this potion's image key
+    pub image_key: u16,
 }
