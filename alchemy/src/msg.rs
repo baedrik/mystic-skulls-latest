@@ -109,6 +109,7 @@ pub enum ExecuteMsg {
         /// optional list of potion indices to disable
         by_index: Option<Vec<u16>>,
     },
+    /// TODO remove after testing
     /// enable potions
     EnablePotions {
         /// optional list of potion names to enable
