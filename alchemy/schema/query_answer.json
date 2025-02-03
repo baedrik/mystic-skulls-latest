@@ -4,6 +4,31 @@
   "description": "responses to queries",
   "oneOf": [
     {
+      "description": "displays the commonality scores for all ingredients",
+      "type": "object",
+      "required": [
+        "commonalities"
+      ],
+      "properties": {
+        "commonalities": {
+          "type": "object",
+          "required": [
+            "commonalities"
+          ],
+          "properties": {
+            "commonalities": {
+              "description": "ingredient names and commonalities",
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/IngredientCommonality"
+              }
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
       "description": "displays the counts of potions discovered and ingredients consumed in brewing",
       "type": "object",
       "required": [
@@ -184,6 +209,7 @@
           "required": [
             "alchemy_state",
             "crating_state",
+            "recipe_gen_info",
             "staking_state",
             "transmute_state"
           ],
@@ -193,6 +219,14 @@
             },
             "crating_state": {
               "$ref": "#/definitions/DisplayCrateState"
+            },
+            "recipe_gen_info": {
+              "description": "TODO remove after testing",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/RecipeGen"
+                }
+              ]
             },
             "staking_state": {
               "$ref": "#/definitions/StakingState"
@@ -781,10 +815,11 @@
       "description": "displayable rules of potion effects",
       "type": "object",
       "required": [
+        "builds_potion_list",
+        "category_rep",
         "cyclops_weights",
         "do_all_listed_potions",
         "dye_style",
-        "has_recipe",
         "is_addition_potion",
         "is_disabled",
         "jaw_only",
@@ -796,6 +831,14 @@
         "testing"
       ],
       "properties": {
+        "builds_potion_list": {
+          "description": "true if this builds potion weights dynamically (addition and full reroll)",
+          "type": "boolean"
+        },
+        "category_rep": {
+          "description": "true if this potion represents a category when building potion weights",
+          "type": "boolean"
+        },
         "cyclops_weights": {
           "description": "randomization weight table for cyclops",
           "type": "array",
@@ -816,10 +859,6 @@
         },
         "dye_style": {
           "description": "true if this potion changes the color but keeps style of a trait",
-          "type": "boolean"
-        },
-        "has_recipe": {
-          "description": "true if the recipe has been generated",
           "type": "boolean"
         },
         "is_addition_potion": {
@@ -991,6 +1030,26 @@
         }
       }
     },
+    "IngredientCommonality": {
+      "description": "an ingredient and its commonality score",
+      "type": "object",
+      "required": [
+        "commonality",
+        "ingredient"
+      ],
+      "properties": {
+        "commonality": {
+          "description": "commonality score of this ingredient to use during recipe generation",
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0.0
+        },
+        "ingredient": {
+          "description": "name of the ingredient",
+          "type": "string"
+        }
+      }
+    },
     "IngredientQty": {
       "description": "an ingredient and its quantity",
       "type": "object",
@@ -1086,6 +1145,34 @@
           "type": "integer",
           "format": "uint16",
           "minimum": 0.0
+        }
+      }
+    },
+    "RecipeGen": {
+      "description": "additional info needed when generating recipes and defining potions",
+      "type": "object",
+      "required": [
+        "rarities",
+        "usage"
+      ],
+      "properties": {
+        "rarities": {
+          "description": "rarity scores for ingredients",
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0.0
+          }
+        },
+        "usage": {
+          "description": "usage counts for each ingredient",
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0.0
+          }
         }
       }
     },
@@ -1189,11 +1276,26 @@
       "description": "some query fields only used during testing TODO remove",
       "type": "object",
       "required": [
+        "commonality",
+        "complexity",
         "found",
         "image_key",
+        "name",
         "recipe"
       ],
       "properties": {
+        "commonality": {
+          "description": "desired average commonality of ingredients in the recipe",
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0.0
+        },
+        "complexity": {
+          "description": "desired approximate length of the recipe generated for this potion. Contract will randomly choose to adjust this length.  Acceptable input is 5-9, inclusive",
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0.0
+        },
         "found": {
           "description": "true if this potion has been discovered",
           "type": "boolean"
@@ -1203,6 +1305,10 @@
           "type": "integer",
           "format": "uint16",
           "minimum": 0.0
+        },
+        "name": {
+          "description": "this potion's name",
+          "type": "string"
         },
         "recipe": {
           "description": "this potion's recipe",
@@ -1259,6 +1365,7 @@
       "description": "global transmutation info",
       "type": "object",
       "required": [
+        "build_list",
         "cyclops",
         "jaw_only",
         "jawless",
@@ -1267,6 +1374,15 @@
         "skull_idx"
       ],
       "properties": {
+        "build_list": {
+          "description": "potion indices by category used for building addition and full reroll lists",
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0.0
+          }
+        },
         "cyclops": {
           "description": "StoredLayerId for cyclops",
           "allOf": [

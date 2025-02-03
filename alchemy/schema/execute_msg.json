@@ -4,6 +4,56 @@
   "description": "Handle messages",
   "oneOf": [
     {
+      "description": "override category representative potions for building potion weights for addition and full rerolls",
+      "type": "object",
+      "required": [
+        "override_category_rep"
+      ],
+      "properties": {
+        "override_category_rep": {
+          "type": "object",
+          "required": [
+            "overrides"
+          ],
+          "properties": {
+            "overrides": {
+              "description": "list of overrides to perform",
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/CategoryRepOverride"
+              }
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "update commonality scores for ingredients",
+      "type": "object",
+      "required": [
+        "update_commonalities"
+      ],
+      "properties": {
+        "update_commonalities": {
+          "type": "object",
+          "required": [
+            "ingredients"
+          ],
+          "properties": {
+            "ingredients": {
+              "description": "list of ingredients to update",
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/IngredientCommonality"
+              }
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
       "description": "add potion images",
       "type": "object",
       "required": [
@@ -397,7 +447,7 @@
             "ingredients": {
               "type": "array",
               "items": {
-                "type": "string"
+                "$ref": "#/definitions/IngredientCommonality"
               }
             }
           }
@@ -795,6 +845,37 @@
       "description": "Binary is a wrapper around Vec<u8> to add base64 de/serialization with serde. It also adds some helper methods to help encode inline.\n\nThis is only needed as serde-json-{core,wasm} has a horrible encoding for Vec<u8>. See also <https://github.com/CosmWasm/cosmwasm/blob/main/docs/MESSAGE_TYPES.md>.",
       "type": "string"
     },
+    "CategoryRepOverride": {
+      "description": "info used to override category representative potions in the build list",
+      "type": "object",
+      "properties": {
+        "category_by_index": {
+          "description": "optionally specify the category by index.  If both category_by_name and category_by_index are provided, category_by_name will be ignored",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint8",
+          "minimum": 0.0
+        },
+        "category_by_name": {
+          "description": "optionally specify the category by name.  If both category_by_name and category_by_index are provided, category_by_name will be ignored",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "potion_index": {
+          "description": "optional potion index to use for this category.  None removes an existing",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "minimum": 0.0
+        }
+      }
+    },
     "ContractInfo": {
       "description": "code hash and address of a secret contract",
       "type": "object",
@@ -874,6 +955,26 @@
           "type": "integer",
           "format": "uint16",
           "minimum": 0.0
+        }
+      }
+    },
+    "IngredientCommonality": {
+      "description": "an ingredient and its commonality score",
+      "type": "object",
+      "required": [
+        "commonality",
+        "ingredient"
+      ],
+      "properties": {
+        "commonality": {
+          "description": "commonality score of this ingredient to use during recipe generation",
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0.0
+        },
+        "ingredient": {
+          "description": "name of the ingredient",
+          "type": "string"
         }
       }
     },
@@ -957,6 +1058,10 @@
       "description": "potion definition",
       "type": "object",
       "required": [
+        "build_list",
+        "category_rep",
+        "commonality",
+        "complexity",
         "cyclops_weights",
         "do_all_listed_potions",
         "dye_style",
@@ -968,6 +1073,26 @@
         "required_traits"
       ],
       "properties": {
+        "build_list": {
+          "description": "true if this should dynamically build the potion weights (addition and full reroll)",
+          "type": "boolean"
+        },
+        "category_rep": {
+          "description": "true if this potion represents a category when building potion weights",
+          "type": "boolean"
+        },
+        "commonality": {
+          "description": "desired average commonality of ingredients in the recipe",
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0.0
+        },
+        "complexity": {
+          "description": "desired approximate length of the recipe generated for this potion. Contract will randomly choose to adjust this length.  Acceptable input is 5-9, inclusive",
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0.0
+        },
         "cyclops_weights": {
           "description": "randomization weight table for cyclops",
           "type": "array",

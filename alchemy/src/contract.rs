@@ -18,10 +18,10 @@ use secret_toolkit::{
 
 use crate::contract_info::{ContractInfo, StoreContractInfo};
 use crate::msg::{
-    ChargeInfo, Dependencies, DisplayCrateState, DisplayPotionRules, EligibilityInfo,
-    ExecuteAnswer, ExecuteMsg, IdxImage, IngrSetWeight, IngredientQty, IngredientSet,
-    InstantiateMsg, PotionStats, PotionWeight, QueryAnswer, QueryMsg, RewindStatus, StakingTable,
-    Testing, TraitWeight, VariantIdxName, VariantList, ViewerInfo,
+    CategoryRepOverride, ChargeInfo, Dependencies, DisplayCrateState, DisplayPotionRules,
+    EligibilityInfo, ExecuteAnswer, ExecuteMsg, IdxImage, IngrSetWeight, IngredientCommonality,
+    IngredientQty, IngredientSet, InstantiateMsg, PotionStats, PotionWeight, QueryAnswer, QueryMsg,
+    RewindStatus, StakingTable, Testing, TraitWeight, VariantIdxName, VariantList, ViewerInfo,
 };
 use crate::server_msgs::{
     LayerNamesWrapper, ServeAlchemyWrapper, ServerQueryMsg, StoredDependencies,
@@ -31,20 +31,28 @@ use crate::snip721::{
     Snip721HandleMsg, Snip721QueryMsg, Trait,
 };
 use crate::state::{
-    AlchemyState, CrateState, MetaAdd, RecipeIdx, SkullStakeInfo, StakingState, StoredIngrSet,
-    StoredLayerId, StoredPotionRules, StoredSetWeight, StoredTraitWeight, StoredVariantList,
-    TransmuteState, Weighted, ADMINS_KEY, ALCHEMY_STATE_KEY, CATEGORIES_KEY, CONSUMED_KEY,
-    CRATES_KEY, CRATE_META_KEY, CRATE_STATE_KEY, DEPENDENCIES_KEY, INGREDIENTS_KEY,
+    AlchemyState, CrateState, MetaAdd, RecipeGen, RecipeIdx, SkullStakeInfo, StakingState,
+    StoredIngrSet, StoredLayerId, StoredPotionRules, StoredSetWeight, StoredTraitWeight,
+    StoredVariantList, TransmuteState, Weighted, ADMINS_KEY, ALCHEMY_STATE_KEY, CATEGORIES_KEY,
+    CONSUMED_KEY, CRATES_KEY, CRATE_META_KEY, CRATE_STATE_KEY, DEPENDENCIES_KEY, INGREDIENTS_KEY,
     INGRED_SETS_KEY, MATERIALS_KEY, MY_VIEWING_KEY, NAME_KEYWORD_KEY, POTION_721_KEY,
     POTION_META_KEY, PREFIX_IMAGE_POOL, PREFIX_NAME_2_POTION_IDX, PREFIX_POTION_FOUND,
     PREFIX_POTION_IDX_2_RECIPE, PREFIX_POTION_IMAGE, PREFIX_POTION_META_ADD, PREFIX_POTION_RULES,
     PREFIX_RECIPES_BY_LEN, PREFIX_RECIPE_2_NAME, PREFIX_REVOKED_PERMITS, PREFIX_SKULL_STAKE,
     PREFIX_STAKING_TABLE, PREFIX_USER_INGR_INVENTORY, PREFIX_USER_STAKE, PREFIX_VARIANTS,
-    SKULL_721_KEY, STAKING_STATE_KEY, SVG_SERVER_KEY, TRANSMUTE_STATE_KEY,
+    RECIPE_GEN_KEY, SKULL_721_KEY, STAKING_STATE_KEY, SVG_SERVER_KEY, TRANSMUTE_STATE_KEY,
 };
 use crate::storage::{load, may_load, save};
 
 pub const BLOCK_SIZE: usize = 256;
+pub const CALC_RARITY_FACTOR: u64 = 300;
+pub const USAGE_FACTOR: u64 = 200;
+pub const MIN_RECIPE_LEN: i8 = 5;
+pub const MAX_RECIPE_LEN: i8 = 9;
+pub const RARITY_AVG_THRESHOLD: u8 = 3;
+pub const WHEN_THRESHOLD: u8 = 7;
+pub const MIN_USAGE_PEN_LIM: u8 = 2;
+pub const MAX_USAGE_PEN_LIM: u8 = 8;
 
 ////////////////////////////////////// Instantiate ///////////////////////////////////////
 /// Returns StdResult<Response>
@@ -141,6 +149,7 @@ pub fn instantiate(
         skip: Vec::new(),
         nones: Vec::new(),
         jaw_only: Vec::new(),
+        build_list: Vec::new(),
         cyclops: StoredLayerId {
             category: 5,
             variant: 1,
@@ -154,6 +163,11 @@ pub fn instantiate(
     save(deps.storage, TRANSMUTE_STATE_KEY, &trn_st)?;
     let crate_st = CrateState { halt: true, cnt: 0 };
     save(deps.storage, CRATE_STATE_KEY, &crate_st)?;
+    let rec_gen = RecipeGen {
+        rarities: Vec::new(),
+        usage: Vec::new(),
+    };
+    save(deps.storage, RECIPE_GEN_KEY, &rec_gen)?;
     let messages = vec![
         Snip721HandleMsg::SetViewingKey { key: key.clone() }.to_cosmos_msg(
             svg_raw.code_hash,
@@ -202,6 +216,12 @@ pub fn execute(deps: DepsMut, env: Env, info: MessageInfo, msg: ExecuteMsg) -> S
     let response = match msg {
         ExecuteMsg::CreateViewingKey { entropy } => try_create_key(deps, &env, &info, &entropy),
         ExecuteMsg::SetViewingKey { key, .. } => try_set_key(deps, &info.sender, key),
+        ExecuteMsg::OverrideCategoryRep { overrides } => {
+            try_rep_override(deps, &info.sender, overrides)
+        }
+        ExecuteMsg::UpdateCommonalities { ingredients } => {
+            try_update_common(deps, &info.sender, ingredients)
+        }
         ExecuteMsg::Rewind {
             token_id,
             ingredients,
@@ -938,7 +958,16 @@ fn try_define_potions(
     let cat_cnt = cats.len();
     let mut vars = vec![Vec::new(); cat_cnt];
     let old_ptn_cnt = alc_st.potion_cnt;
-
+    let mut rec_gen = may_load::<RecipeGen>(deps.storage, RECIPE_GEN_KEY)?
+        .ok_or_else(|| StdError::generic_err("RecipeGen storage is corrupt"))?;
+    // weights to randomly adjust the recipe length from input complexity
+    let len_adj = vec![
+        LengthAdj { adj: 0, weight: 4 },
+        LengthAdj { adj: 1, weight: 3 },
+        LengthAdj { adj: -1, weight: 3 },
+        LengthAdj { adj: 2, weight: 1 },
+        LengthAdj { adj: -2, weight: 1 },
+    ];
     for potion in potion_definitions.into_iter() {
         // generate a unique encoded potion name
         let mut idx_store = PrefixedStorage::new(deps.storage, PREFIX_NAME_2_POTION_IDX);
@@ -995,6 +1024,10 @@ fn try_define_potions(
             is_add: potion.is_addition_potion,
             do_all: potion.do_all_listed_potions,
             dye_style: potion.dye_style,
+            build_list: potion.build_list,
+            cat_rep: potion.category_rep,
+            complex: potion.complexity,
+            rare: potion.commonality,
         };
         // shouldn't ever be possible to already have this idx in jaw_only, but in case some
         // later code migration has a buggy side effect...
@@ -1003,6 +1036,16 @@ fn try_define_potions(
         }
         let idx_key = alc_st.potion_cnt.to_le_bytes();
         let mut rul_store = PrefixedStorage::new(deps.storage, PREFIX_POTION_RULES);
+        // if this potion is one to use for full rerolls or addition
+        if rule.cat_rep {
+            change_cat_rep(
+                &mut rul_store,
+                &mut trn_st.build_list,
+                rule.normal_weights[0].layer.category as usize,
+                alc_st.potion_cnt,
+                false,
+            )?;
+        }
         save(&mut rul_store, &idx_key, &rule)?;
         // save the image key and optional description postscript
         let meta_add = MetaAdd {
@@ -1011,7 +1054,33 @@ fn try_define_potions(
         };
         let mut add_store = PrefixedStorage::new(deps.storage, PREFIX_POTION_META_ADD);
         save(&mut add_store, &idx_key, &meta_add)?;
-
+        // generate the recipe
+        let mut rcp2nm_store = PrefixedStorage::new(deps.storage, PREFIX_RECIPE_2_NAME);
+        let recipe = gen_recipe(
+            &mut rcp2nm_store,
+            &len_adj,
+            &mut rec_gen,
+            &mut prng,
+            &encoded,
+            potion.commonality,
+            potion.complexity as i8,
+        )?;
+        let recipe_len = recipe.len() as u8;
+        // map the potion idx to the recipe
+        let mut p2r_store = PrefixedStorage::new(deps.storage, PREFIX_POTION_IDX_2_RECIPE);
+        save(&mut p2r_store, &idx_key, &recipe)?;
+        // add to recipes grouped by length
+        let rec_idx = RecipeIdx {
+            recipe,
+            idx: alc_st.potion_cnt,
+        };
+        let mut by_len_store = PrefixedStorage::new(deps.storage, PREFIX_RECIPES_BY_LEN);
+        let by_len_key = recipe_len.to_le_bytes();
+        // get all recipes with same length
+        let mut cookbook =
+            may_load::<Vec<RecipeIdx>>(&by_len_store, &by_len_key)?.unwrap_or_default();
+        cookbook.push(rec_idx);
+        save(&mut by_len_store, &by_len_key, &cookbook)?;
         alc_st.potion_cnt = alc_st.potion_cnt.checked_add(1).ok_or_else(|| {
             StdError::generic_err("Reached implementation limit for potion definition")
         })?;
@@ -1359,6 +1428,103 @@ fn try_set_meta(
 
 /// Returns StdResult<Response>
 ///
+/// update the commonality scores of specified ingredients
+///
+/// # Arguments
+///
+/// * `deps` - a mutable reference to Extern containing all the contract's external dependencies
+/// * `sender` - a reference to the message sender
+/// * `updates` - new IngredientCommonality values to use
+fn try_update_common(
+    deps: DepsMut,
+    sender: &Addr,
+    updates: Vec<IngredientCommonality>,
+) -> StdResult<Response> {
+    // only allow admins to do this
+    check_admin_tx(deps.as_ref(), sender)?;
+    let ingredients: Vec<String> = may_load(deps.storage, INGREDIENTS_KEY)?.unwrap_or_default();
+    let mut rec_gen = may_load::<RecipeGen>(deps.storage, RECIPE_GEN_KEY)?
+        .ok_or_else(|| StdError::generic_err("RecipeGen storage is corrupt"))?;
+
+    for upd in updates.into_iter() {
+        let ing_idx = ingredients
+            .iter()
+            .position(|i| *i == upd.ingredient)
+            .ok_or_else(|| {
+                StdError::generic_err(format!("{} is not a known ingredient", upd.ingredient))
+            })?;
+        rec_gen.rarities[ing_idx] = upd.commonality;
+    }
+    save(deps.storage, RECIPE_GEN_KEY, &rec_gen)?;
+
+    Ok(
+        Response::new().set_data(to_binary(&ExecuteAnswer::Ingredients {
+            ingredients: ingredients
+                .into_iter()
+                .zip(rec_gen.rarities.into_iter())
+                .map(|(ingredient, commonality)| IngredientCommonality {
+                    ingredient,
+                    commonality,
+                })
+                .collect::<Vec<IngredientCommonality>>(),
+        })?),
+    )
+}
+
+/// Returns StdResult<Response>
+///
+/// override potions used to build the potion list for addition and full reroll potions
+///
+/// # Arguments
+///
+/// * `deps` - a mutable reference to Extern containing all the contract's external dependencies
+/// * `sender` - a reference to the message sender
+/// * `overrides` - list of CategoryRepOverride to perform
+fn try_rep_override(
+    deps: DepsMut,
+    sender: &Addr,
+    overrides: Vec<CategoryRepOverride>,
+) -> StdResult<Response> {
+    // only allow admins to do this
+    check_admin_tx(deps.as_ref(), sender)?;
+    let categories = may_load::<Vec<String>>(deps.storage, CATEGORIES_KEY)?.unwrap_or_default();
+    let mut trn_st: TransmuteState = load(deps.storage, TRANSMUTE_STATE_KEY)?;
+    let mut rul_store = PrefixedStorage::new(deps.storage, PREFIX_POTION_RULES);
+
+    for over in overrides.into_iter() {
+        let cat_idx = if let Some(idx) = over.category_by_index {
+            idx as usize
+        } else if let Some(name) = over.category_by_name {
+            categories
+                .iter()
+                .position(|cat| *cat == name)
+                .ok_or_else(|| {
+                    StdError::generic_err(format!("{} is not a valid category name", name))
+                })?
+        } else {
+            return Err(StdError::generic_err(
+                "Neither index nor name was provided for the category",
+            ));
+        };
+        let new_rep = over.potion_index.unwrap_or(u16::MAX);
+        change_cat_rep(
+            &mut rul_store,
+            &mut trn_st.build_list,
+            cat_idx,
+            new_rep,
+            true,
+        )?;
+    }
+    save(deps.storage, TRANSMUTE_STATE_KEY, &trn_st)?;
+    Ok(
+        Response::new().set_data(to_binary(&ExecuteAnswer::OverrideCategoryRep {
+            build_list: trn_st.build_list,
+        })?),
+    )
+}
+
+/// Returns StdResult<Response>
+///
 /// define the staking tables
 ///
 /// # Arguments
@@ -1557,22 +1723,38 @@ fn try_set_ingred_set(
 ///
 /// * `deps` - a mutable reference to Extern containing all the contract's external dependencies
 /// * `sender` - a reference to the message sender
-/// * `ingr_to_add` - list of ingredient names to add
+/// * `ingr_to_add` - list of ingredient names and commonalities to add
 fn try_add_ingredients(
     deps: DepsMut,
     sender: &Addr,
-    ingr_to_add: Vec<String>,
+    ingr_to_add: Vec<IngredientCommonality>,
 ) -> StdResult<Response> {
     // only allow admins to do this
     check_admin_tx(deps.as_ref(), sender)?;
     let mut ingredients: Vec<String> = may_load(deps.storage, INGREDIENTS_KEY)?.unwrap_or_default();
+    let mut rec_gen = may_load::<RecipeGen>(deps.storage, RECIPE_GEN_KEY)?
+        .ok_or_else(|| StdError::generic_err("RecipeGen storage is corrupt"))?;
     for ingr in ingr_to_add.into_iter() {
-        if !ingredients.contains(&ingr) {
-            ingredients.push(ingr);
+        if !ingredients.contains(&ingr.ingredient) {
+            ingredients.push(ingr.ingredient);
+            rec_gen.rarities.push(ingr.commonality);
+            rec_gen.usage.push(0);
         }
     }
     save(deps.storage, INGREDIENTS_KEY, &ingredients)?;
-    Ok(Response::new().set_data(to_binary(&ExecuteAnswer::AddIngredients { ingredients })?))
+    save(deps.storage, RECIPE_GEN_KEY, &rec_gen)?;
+    Ok(
+        Response::new().set_data(to_binary(&ExecuteAnswer::Ingredients {
+            ingredients: ingredients
+                .into_iter()
+                .zip(rec_gen.rarities.into_iter())
+                .map(|(ingredient, commonality)| IngredientCommonality {
+                    ingredient,
+                    commonality,
+                })
+                .collect::<Vec<IngredientCommonality>>(),
+        })?),
+    )
 }
 
 /// Returns StdResult<Response>
@@ -1603,6 +1785,7 @@ fn try_get_deps(deps: DepsMut, sender: &Addr, env: Env) -> StdResult<Response> {
     let mut trn_st: TransmuteState = load(deps.storage, TRANSMUTE_STATE_KEY)?;
     let categories = may_load::<Vec<String>>(deps.storage, CATEGORIES_KEY)?.unwrap_or_default();
     let cat_cnt = categories.len() as u8;
+    trn_st.build_list = vec![u16::MAX; cat_cnt as usize];
     let var_store = ReadonlyPrefixedStorage::new(deps.storage, PREFIX_VARIANTS);
     trn_st.nones = Vec::new();
     for i in 0..cat_cnt {
@@ -1820,6 +2003,9 @@ pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
         QueryMsg::NameKeywords { viewer, permit } => {
             query_keywords(deps, viewer, permit, &env.contract.address)
         }
+        QueryMsg::Commonalities { viewer, permit } => {
+            query_commonality(deps, viewer, permit, &env.contract.address)
+        }
         QueryMsg::HaltStatuses {} => query_halt(deps.storage),
         QueryMsg::Contracts {} => query_contracts(deps),
         QueryMsg::Counts {} => query_counts(deps.storage),
@@ -1939,40 +2125,52 @@ fn query_rules(
     let rul_store = ReadonlyPrefixedStorage::new(deps.storage, PREFIX_POTION_RULES);
     let p2r_store = ReadonlyPrefixedStorage::new(deps.storage, PREFIX_POTION_IDX_2_RECIPE);
     let add_store = ReadonlyPrefixedStorage::new(deps.storage, PREFIX_POTION_META_ADD);
+    let rc2nm_store = ReadonlyPrefixedStorage::new(deps.storage, PREFIX_RECIPE_2_NAME);
+    let mut keywords = Vec::new();
     let mut potion_rules = Vec::new();
 
     // TODO remove
     let ingredients: Vec<String> = may_load(deps.storage, INGREDIENTS_KEY)?.unwrap_or_default();
     let found_store = ReadonlyPrefixedStorage::new(deps.storage, PREFIX_POTION_FOUND);
 
+    let built_list = trn_st
+        .build_list
+        .into_iter()
+        .filter_map(|u| {
+            if u != u16::MAX && !alc_st.disabled.contains(&u) {
+                Some(PotionWeight { idx: u, weight: 1 })
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<PotionWeight>>();
     for idx in start..end {
         let is_disabled = alc_st.disabled.contains(&idx);
         let ptn_key = idx.to_le_bytes();
-        if let Some(rules) = may_load::<StoredPotionRules>(&rul_store, &ptn_key)? {
+        if let Some(mut rules) = may_load::<StoredPotionRules>(&rul_store, &ptn_key)? {
             let meta_add = may_load::<MetaAdd>(&add_store, &ptn_key)?.ok_or_else(|| {
                 StdError::generic_err("Additional potion metadata storage is corrupt")
             })?;
-            // check if a recipe was generated
-            // TODO let has_recipe = may_load::<Vec<u8>>(&p2r_store, &ptn_key)?.is_some();
-
-            let (has_recipe, recipe, found) =
-                if let Some(rcp) = may_load::<Vec<u8>>(&p2r_store, &ptn_key)? {
-                    (
-                        true,
-                        rcp.iter()
-                            .map(|i| ingredients[*i as usize].clone())
-                            .collect::<Vec<String>>(),
-                        may_load::<bool>(&found_store, &ptn_key)?.is_some(),
-                    )
-                } else {
-                    (false, Vec::new(), false)
-                };
+            // TODO remove testing
+            let recipe_raw = may_load::<Vec<u8>>(&p2r_store, &ptn_key)?
+                .ok_or_else(|| StdError::generic_err("Potion to recipe storage is corrupt"))?;
+            let encoded = may_load::<Vec<u8>>(&rc2nm_store, recipe_raw.as_slice())?
+                .ok_or_else(|| StdError::generic_err("Recipe to name storage is corrupt"))?;
             let testing = Testing {
-                found,
-                recipe,
+                name: derive_name(deps.storage, encoded.as_slice(), &mut keywords)?,
+                found: may_load::<bool>(&found_store, &ptn_key)?.is_some(),
+                recipe: recipe_raw
+                    .iter()
+                    .map(|u| ingredients[*u as usize].clone())
+                    .collect::<Vec<String>>(),
                 image_key: meta_add.image,
+                complexity: rules.complex,
+                commonality: rules.rare,
             };
 
+            if rules.build_list {
+                rules.potion_weights = built_list.clone();
+            }
             potion_rules.push(DisplayPotionRules {
                 potion_idx: idx,
                 normal_weights: rules
@@ -2002,7 +2200,8 @@ fn query_rules(
                 dye_style: rules.dye_style,
                 is_disabled,
                 jaw_only: trn_st.jaw_only.contains(&idx),
-                has_recipe,
+                builds_potion_list: rules.build_list,
+                category_rep: rules.cat_rep,
                 testing,
             });
         }
@@ -2584,6 +2783,38 @@ fn query_mater(
     })
 }
 
+/// Returns StdResult<Binary> displaying the ingredients and their commonality scores
+///
+/// # Arguments
+///
+/// * `deps` - reference to Extern containing all the contract's external dependencies
+/// * `viewer` - optional address and key making an authenticated query request
+/// * `permit` - optional permit with "owner" permission
+/// * `my_addr` - a reference to this contract's address
+fn query_commonality(
+    deps: Deps,
+    viewer: Option<ViewerInfo>,
+    permit: Option<Permit>,
+    my_addr: &Addr,
+) -> StdResult<Binary> {
+    // only allow admins to do this
+    check_admin_query(deps, viewer, permit, my_addr)?;
+    let ingredients: Vec<String> = may_load(deps.storage, INGREDIENTS_KEY)?.unwrap_or_default();
+    let rec_gen = may_load::<RecipeGen>(deps.storage, RECIPE_GEN_KEY)?
+        .ok_or_else(|| StdError::generic_err("RecipeGen storage is corrupt"))?;
+
+    to_binary(&QueryAnswer::Commonalities {
+        commonalities: ingredients
+            .into_iter()
+            .zip(rec_gen.rarities.into_iter())
+            .map(|(ingredient, commonality)| IngredientCommonality {
+                ingredient,
+                commonality,
+            })
+            .collect::<Vec<IngredientCommonality>>(),
+    })
+}
+
 /// Returns StdResult<Binary> displaying the staking and alchemy states
 ///
 /// # Arguments
@@ -2604,6 +2835,8 @@ fn query_state(
     let alchemy_state: AlchemyState = load(deps.storage, ALCHEMY_STATE_KEY)?;
     let crt_st: CrateState = load(deps.storage, CRATE_STATE_KEY)?;
     let transmute_state: TransmuteState = load(deps.storage, TRANSMUTE_STATE_KEY)?;
+    // TODO remove this so can't see usage counts after testing
+    let recipe_gen_info: RecipeGen = load(deps.storage, RECIPE_GEN_KEY)?;
 
     to_binary(&QueryAnswer::States {
         staking_state,
@@ -2613,6 +2846,7 @@ fn query_state(
             halt: crt_st.halt,
             cnt: Uint128::new(crt_st.cnt),
         },
+        recipe_gen_info,
     })
 }
 
@@ -3214,7 +3448,7 @@ fn rcv_potion(
     let skull_id: String =
         from_binary(&msg.ok_or_else(|| StdError::generic_err("Skull ID was not provided"))?)?;
     let distill = &skull_id == "distill";
-    let trn_st: TransmuteState = load(deps.storage, TRANSMUTE_STATE_KEY)?;
+    let mut trn_st: TransmuteState = load(deps.storage, TRANSMUTE_STATE_KEY)?;
     // get the name of the potion
     let pot_name = Snip721QueryMsg::NftInfo {
         token_id: pot_id.clone(),
@@ -3300,6 +3534,12 @@ fn rcv_potion(
             .unwrap_or_default();
         let is_jawless = old_image[trn_st.jawless.category as usize] == trn_st.jawless.variant;
         let is_cyclops = old_image[trn_st.cyclops.category as usize] == trn_st.cyclops.variant;
+        // filter disabled potions from the build list
+        for bld in trn_st.build_list.iter_mut() {
+            if disabled.contains(bld) {
+                *bld = u16::MAX;
+            }
+        }
 
         // keep applying until we are done with all potions
         while !potions.is_empty() {
@@ -3422,18 +3662,16 @@ fn apply_potion(
         .ok_or_else(|| StdError::generic_err("Empty potions index array"))?;
     let rul_store = ReadonlyPrefixedStorage::new(storage, PREFIX_POTION_RULES);
     let mut rules: StoredPotionRules = load(&rul_store, &ptn_idx.to_le_bytes())?;
-    if rules.is_add {
-        // if this is the addition potion, only draw from category potions where this skull has a None
-        rules.potion_weights = rules
-            .potion_weights
-            .into_iter()
-            .filter_map(|p| {
-                let cat_idx = p.weight as usize;
-                if image[cat_idx] == trn_st.nones[cat_idx] {
-                    Some(PotionWeight {
-                        idx: p.idx,
-                        weight: 1,
-                    })
+    // if we need to build a potion list
+    if rules.build_list {
+        rules.potion_weights = trn_st
+            .build_list
+            .iter()
+            .enumerate()
+            .filter_map(|(i, p)| {
+                if *p != u16::MAX && (rules.do_all || (rules.is_add && image[i] == trn_st.nones[i]))
+                {
+                    Some(PotionWeight { idx: *p, weight: 1 })
                 } else {
                     None
                 }
@@ -3441,7 +3679,7 @@ fn apply_potion(
             .collect::<Vec<PotionWeight>>();
         if rules.potion_weights.is_empty() {
             return Err(StdError::generic_err(
-                "This skull does not have any Nones that can be transmuted",
+                "This skull can not be affected by this potion",
             ));
         }
     }
@@ -3548,14 +3786,14 @@ fn apply_potion(
 /// * `prng` - a mutable reference to the ContractPrng used to draw random selections
 /// * `table` - weighted table slice
 fn draw_winner<T: Weighted>(prng: &mut ContractPrng, table: &mut Vec<T>) -> T {
-    let mut total_weight: u16 = 0;
+    let mut total_weight = 0u64;
     for t in table.iter() {
         total_weight += t.weight();
     }
     // randomly pick the winner
     let rdm = prng.next_u64();
-    let winning_num: u16 = (rdm % total_weight as u64) as u16;
-    let mut tally = 0u16;
+    let winning_num = rdm % total_weight;
+    let mut tally = 0u64;
     let mut winner = 0usize;
     for (i, t) in table.iter().enumerate() {
         // if the sum didn't panic on overflow, it can't happen here
@@ -3707,6 +3945,241 @@ fn can_rewind(image: &ImageInfo) -> Option<String> {
     }
 }
 
+/// Returns StdResult<()>
+///
+/// update the build list and any potion rules affected by the change
+///
+/// # Arguments
+///
+/// * `storage` - a mutable reference to potion rule storage
+/// * `build_list` - list of potions to use when building lists
+/// * `cat_idx` - index of the category whose rep is changing
+/// * `new_potion` - potion index of the new rep for this category
+/// * `save_new` - true if the potion rule for the new potion should be updated and saved
+fn change_cat_rep(
+    storage: &mut dyn Storage,
+    build_list: &mut [u16],
+    cat_idx: usize,
+    new_potion: u16,
+    save_new: bool,
+) -> StdResult<()> {
+    let old_rep = build_list[cat_idx];
+    if old_rep != new_potion {
+        if old_rep != u16::MAX {
+            // had a previous rep potion
+            let old_rep_key = old_rep.to_le_bytes();
+            if let Some(mut old_rep_rule) = may_load::<StoredPotionRules>(storage, &old_rep_key)? {
+                // save that it is no longer the rep
+                old_rep_rule.cat_rep = false;
+                save(storage, &old_rep_key, &old_rep_rule)?;
+            }
+        }
+        if save_new && new_potion != u16::MAX {
+            // need to update the new potion's rule
+            let new_potion_key = new_potion.to_le_bytes();
+            let mut new_potion_rule = may_load::<StoredPotionRules>(storage, &new_potion_key)?
+                .ok_or_else(|| {
+                    StdError::generic_err(format!("{} is not a valid potion index", new_potion))
+                })?;
+            new_potion_rule.cat_rep = true;
+            save(storage, &new_potion_key, &new_potion_rule)?;
+        }
+        build_list[cat_idx] = new_potion;
+    }
+    Ok(())
+}
+
+// struct used to randomize recipe length
+#[derive(Clone)]
+pub struct LengthAdj {
+    // adjustment amount
+    pub adj: i8,
+    // draw weight for this adjustment
+    pub weight: u64,
+}
+
+impl Weighted for LengthAdj {
+    fn weight(&self) -> u64 {
+        self.weight
+    }
+}
+
+// struct used to randomize recipe ingredients
+pub struct IngredientWeight {
+    // ingredient index
+    pub idx: usize,
+    // draw weight for this ingredient
+    pub weight: u64,
+}
+
+impl Weighted for IngredientWeight {
+    fn weight(&self) -> u64 {
+        self.weight
+    }
+}
+
+/// Returns StdResult<u8>
+///
+/// pick a random ingredient based on rarity and usage
+///
+/// # Arguments
+///
+/// * `target_rarity` - target average rarity for recipe
+/// * `usage` - running counts of ingredient selection
+/// * `rarities` - commonality scores for all ingredients
+/// * `rarity_sum` - running sum of all rarities selected in this recipe
+/// * `ordinal` - how many ingredients have already been selected in this recipe
+/// * `stressor` - increasing severity for rarity selection based on how many spots are left
+/// * `rng` - a mutable reference to the ContractPrng
+fn draw_ingredient(
+    target_rarity: u8,
+    usage: &mut [u32],
+    rarities: &[u8],
+    rarity_sum: &mut u64,
+    ordinal: u64,
+    stressor: u64,
+    rng: &mut ContractPrng,
+) -> u8 {
+    // get least used count
+    let min_cnt = usage.iter().min().unwrap();
+    let zip_stats = rarities.iter().zip(usage.iter());
+    let target_sum = target_rarity as u64 * ordinal;
+    let current_diff = target_sum as i64 - *rarity_sum as i64;
+    // weight rarity importance higher when you are further away from target and when you have fewer ingredients left
+    // to balance it out
+    let rarity_factor =
+        (current_diff.unsigned_abs() + 1) * CALC_RARITY_FACTOR * stressor * stressor;
+    let mut max_pen = 0u64;
+    let mut min_pen = u64::MAX;
+    let total_pens = zip_stats
+        .map(|(r, c)| {
+            // new difference if this ingredient is picked
+            let hypo_diff = current_diff + target_rarity as i64 - *r as i64;
+            let rarity_penalty = hypo_diff.unsigned_abs() * rarity_factor;
+            // only use usage penalty for certain targets
+            let usage_penalty = if (MIN_USAGE_PEN_LIM..MAX_USAGE_PEN_LIM).contains(&target_rarity) {
+                (*c - min_cnt) as u64 * USAGE_FACTOR * stressor * stressor
+            } else {
+                0
+            };
+            let total = rarity_penalty + usage_penalty;
+            if total > max_pen {
+                max_pen = total;
+            }
+            if total < min_pen {
+                min_pen = total;
+            }
+            total
+        })
+        .collect::<Vec<u64>>();
+
+    // still give the lowest weight some chance based on 5% of the spread from low to high
+    let booster = ((max_pen - min_pen) * 5 / 100) + 1;
+    // build the weight table
+    let mut table = total_pens
+        .iter()
+        .enumerate()
+        .map(|(i, u)| IngredientWeight {
+            idx: i,
+            weight: max_pen - *u + booster,
+        })
+        .collect::<Vec<IngredientWeight>>();
+    // select the winner
+    let winner = draw_winner::<IngredientWeight>(rng, &mut table);
+    // increment the usage count for the winner
+    usage[winner.idx] += 1;
+    // include winner rarity in running rarity sum
+    *rarity_sum += rarities[winner.idx] as u64;
+
+    winner.idx as u8
+}
+
+/// Returns StdResult<Vec<u8>>
+///
+/// generate a unique recipe
+///
+/// # Arguments
+///
+/// * `storage` - a mutable reference to recipe to name storage
+/// * `len_adj` - recipe length adjustments and weights
+/// * `rec_gen` - stats needed for recipe generation
+/// * `rng` - a mutable reference to the ContractPrng
+/// * `name` - encoded name of the potion which needs a recipe
+/// * `target_rarity` - target average rarity for the ingredients in the recipe
+/// * `complexity` - base recipe length desired
+fn gen_recipe(
+    storage: &mut dyn Storage,
+    len_adj: &[LengthAdj],
+    rec_gen: &mut RecipeGen,
+    rng: &mut ContractPrng,
+    name: &Vec<u8>,
+    target_rarity: u8,
+    complexity: i8,
+) -> StdResult<Vec<u8>> {
+    // only draw from lengths that are within limits
+    let mut len_table = len_adj
+        .iter()
+        .filter_map(|la| {
+            if (MIN_RECIPE_LEN..MAX_RECIPE_LEN + 1).contains(&(complexity + la.adj)) {
+                Some(la.clone())
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<LengthAdj>>();
+    let len = complexity + draw_winner::<LengthAdj>(rng, &mut len_table).adj;
+    let big_len = len as u64;
+    let stressor = (MAX_RECIPE_LEN + 1 - len) as u64;
+    // create threshold for discarding the recipe if too far from target
+    let threshold = if target_rarity < WHEN_THRESHOLD {
+        RARITY_AVG_THRESHOLD as u64 * big_len
+    } else {
+        u64::MAX
+    };
+    let target_tally = target_rarity as u64 * big_len;
+    let mut rarity_tally: u64;
+    let mut recipe: Vec<u8>;
+    loop {
+        rarity_tally = 0;
+        recipe = Vec::new();
+        // create the recipe
+        for i in 0..big_len {
+            recipe.push(draw_ingredient(
+                target_rarity,
+                &mut rec_gen.usage,
+                &rec_gen.rarities,
+                &mut rarity_tally,
+                i,
+                stressor + i,
+                rng,
+            ));
+        }
+        let rarity_diff = if rarity_tally > target_tally {
+            rarity_tally - target_tally
+        } else {
+            target_tally - rarity_tally
+        };
+        // because the algo tries harder to push back towards the target as we
+        // get closer to the end, let's just give it a shuffle
+        let mut temp = Vec::new();
+        while !recipe.is_empty() {
+            temp.push(recipe.swap_remove((rng.next_u64() % (recipe.len() as u64)) as usize));
+        }
+        recipe = temp;
+        let recipe_key = recipe.as_slice();
+        // keep if close enough to the target and the recipe is unique
+        if rarity_diff < threshold && may_load::<Vec<u8>>(storage, recipe_key)?.is_none() {
+            save(storage, recipe_key, name)?;
+            break;
+        }
+        // discarded so remove the counts
+        for ing in recipe.iter() {
+            rec_gen.usage[*ing as usize] -= 1;
+        }
+    }
+    Ok(recipe)
+}
+
 ///////////////////////////////////// Migrate //////////////////////////////////////
 /// Returns StdResult<Response>
 ///
@@ -3772,11 +4245,18 @@ pub fn migrate(deps: DepsMut, env: Env, _msg: Empty) -> StdResult<Response> {
         skip: Vec::new(),
         nones: Vec::new(),
         jaw_only: Vec::new(),
+        build_list: Vec::new(),
         cyclops: old_st.cyclops,
         jawless: old_st.jawless,
         skull_idx: 2,
     };
     save(deps.storage, TRANSMUTE_STATE_KEY, &trn_st)?;
+    // init recipe generation info
+    let rec_gen = RecipeGen {
+        rarities: Vec::new(),
+        usage: Vec::new(),
+    };
+    save(deps.storage, RECIPE_GEN_KEY, &rec_gen)?;
 
     Ok(Response::new().add_messages(messages))
 }

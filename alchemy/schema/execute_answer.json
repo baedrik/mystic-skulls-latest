@@ -99,13 +99,13 @@
       "additionalProperties": false
     },
     {
-      "description": "response from adding ingredients",
+      "description": "response from adding ingredients or updating commonalities",
       "type": "object",
       "required": [
-        "add_ingredients"
+        "ingredients"
       ],
       "properties": {
-        "add_ingredients": {
+        "ingredients": {
           "type": "object",
           "required": [
             "ingredients"
@@ -115,7 +115,7 @@
               "description": "all known ingredients",
               "type": "array",
               "items": {
-                "type": "string"
+                "$ref": "#/definitions/IngredientCommonality"
               }
             }
           }
@@ -586,6 +586,33 @@
       "additionalProperties": false
     },
     {
+      "description": "response from overriding category representative potions for building potion weights for addition and full rerolls",
+      "type": "object",
+      "required": [
+        "override_category_rep"
+      ],
+      "properties": {
+        "override_category_rep": {
+          "type": "object",
+          "required": [
+            "build_list"
+          ],
+          "properties": {
+            "build_list": {
+              "description": "list of potion indices used for additionn and full rerolls",
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0.0
+              }
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
       "description": "response from revoking a permit",
       "type": "object",
       "required": [
@@ -698,6 +725,26 @@
             "string",
             "null"
           ]
+        }
+      }
+    },
+    "IngredientCommonality": {
+      "description": "an ingredient and its commonality score",
+      "type": "object",
+      "required": [
+        "commonality",
+        "ingredient"
+      ],
+      "properties": {
+        "commonality": {
+          "description": "commonality score of this ingredient to use during recipe generation",
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0.0
+        },
+        "ingredient": {
+          "description": "name of the ingredient",
+          "type": "string"
         }
       }
     },

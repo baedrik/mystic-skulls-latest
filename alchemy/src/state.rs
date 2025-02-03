@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 pub const ADMINS_KEY: &[u8] = b"admin";
 /// storage key for the skull materials
 pub const MATERIALS_KEY: &[u8] = b"mater";
+/// storage key for recipe generation info
+pub const RECIPE_GEN_KEY: &[u8] = b"gnrc";
 /// storage key for the potion ingredients
 pub const INGREDIENTS_KEY: &[u8] = b"ingr";
 /// storage key for the category names
@@ -76,7 +78,7 @@ pub const PREFIX_REVOKED_PERMITS: &str = "revoke";
 
 /// A trait marking types that have a u16 weight
 pub trait Weighted {
-    fn weight(&self) -> u16;
+    fn weight(&self) -> u64;
 }
 
 /// sets of ingredients
@@ -133,6 +135,13 @@ pub struct StoredPotionRules {
     pub do_all: bool,
     /// true if this potion changes the color but keeps style of a trait
     pub dye_style: bool,
+    /// true if potion weights should be built dynamically (addition and full reroll)
+    pub build_list: bool,
+    /// true if this potion represents its category when building potion lists
+    pub cat_rep: bool,
+    /// TODO remove these after testing
+    pub complex: u8,
+    pub rare: u8,
 }
 
 /// list of variants grouped by category
@@ -190,8 +199,8 @@ impl Weighted for StoredTraitWeight {
     /// Returns u16
     ///
     /// returns the weight of this trait
-    fn weight(&self) -> u16 {
-        self.weight
+    fn weight(&self) -> u64 {
+        self.weight as u64
     }
 }
 
@@ -225,6 +234,8 @@ pub struct TransmuteState {
     pub nones: Vec<u8>,
     /// potion indices that can not be used on jawless skulls
     pub jaw_only: Vec<u16>,
+    /// potion indices by category used for building addition and full reroll lists
+    pub build_list: Vec<u16>,
     /// StoredLayerId for cyclops
     pub cyclops: StoredLayerId,
     /// StoredLayerId for jawless
@@ -315,4 +326,13 @@ pub struct MetaAdd {
     pub image: u16,
     /// optional description postscript
     pub desc: Option<String>,
+}
+
+/// additional info needed when generating recipes and defining potions
+#[derive(Serialize, Deserialize, JsonSchema, Clone, PartialEq, Eq, Debug)]
+pub struct RecipeGen {
+    /// rarity scores for ingredients
+    pub rarities: Vec<u8>,
+    /// usage counts for each ingredient
+    pub usage: Vec<u32>,
 }

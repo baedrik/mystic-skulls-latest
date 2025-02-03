@@ -1,7 +1,7 @@
 use crate::contract_info::ContractInfo;
 use crate::snip721::Metadata;
 use crate::state::{
-    AlchemyState, StakingState, StoredLayerId, StoredTraitWeight, StoredVariantList,
+    AlchemyState, RecipeGen, StakingState, StoredLayerId, StoredTraitWeight, StoredVariantList,
     TransmuteState, Weighted, PREFIX_VARIANTS,
 };
 use crate::storage::may_load;
@@ -34,6 +34,17 @@ pub struct InstantiateMsg {
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ExecuteMsg {
+    /// override category representative potions for building potion weights for addition and
+    /// full rerolls
+    OverrideCategoryRep {
+        /// list of overrides to perform
+        overrides: Vec<CategoryRepOverride>,
+    },
+    /// update commonality scores for ingredients
+    UpdateCommonalities {
+        /// list of ingredients to update
+        ingredients: Vec<IngredientCommonality>,
+    },
     /// add potion images
     AddPotionImages {
         /// potion svg images
@@ -106,7 +117,9 @@ pub enum ExecuteMsg {
         by_index: Option<Vec<u16>>,
     },
     /// add ingredients
-    AddIngredients { ingredients: Vec<String> },
+    AddIngredients {
+        ingredients: Vec<IngredientCommonality>,
+    },
     /// add potion name keywords
     AddNameKeywords {
         /// keywords for the first position
@@ -204,10 +217,10 @@ pub enum ExecuteAnswer {
         /// the categories that were reverted
         categories_rewound: Vec<String>,
     },
-    /// response from adding ingredients
-    AddIngredients {
+    /// response from adding ingredients or updating commonalities
+    Ingredients {
         /// all known ingredients
-        ingredients: Vec<String>,
+        ingredients: Vec<IngredientCommonality>,
     },
     /// response from creating named sets of ingredients for staking tables
     DefineIngredientSets {
@@ -303,6 +316,12 @@ pub enum ExecuteAnswer {
         /// largest number of correct recipe positions for all potions of the
         /// attempted size
         number_correct: u8,
+    },
+    /// response from overriding category representative potions for building potion weights
+    /// for addition and full rerolls
+    OverrideCategoryRep {
+        /// list of potion indices used for additionn and full rerolls
+        build_list: Vec<u16>,
     },
     /// response from revoking a permit
     RevokePermit { status: String },
@@ -407,6 +426,14 @@ pub enum QueryMsg {
     },
     /// displays the ingredients
     Ingredients {},
+    /// displays the commonality scores for all ingredients
+    Commonalities {
+        /// optional address and viewing key of an admin
+        viewer: Option<ViewerInfo>,
+        /// optional permit used to verify admin identity.  If both viewer and permit
+        /// are provided, the viewer will be ignored
+        permit: Option<Permit>,
+    },
     /// displays the ingredient sets
     IngredientSets {
         /// optional address and viewing key of an admin
@@ -487,6 +514,11 @@ pub enum QueryMsg {
 #[derive(Serialize, Deserialize, Debug, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum QueryAnswer {
+    /// displays the commonality scores for all ingredients
+    Commonalities {
+        /// ingredient names and commonalities
+        commonalities: Vec<IngredientCommonality>,
+    },
     /// displays the counts of potions discovered and ingredients consumed in brewing
     Counts {
         potions_discovered: u16,
@@ -525,6 +557,8 @@ pub enum QueryAnswer {
         alchemy_state: AlchemyState,
         transmute_state: TransmuteState,
         crating_state: DisplayCrateState,
+        /// TODO remove after testing
+        recipe_gen_info: RecipeGen,
     },
     /// displays the code hashes and addresses of used contracts
     Contracts {
@@ -641,12 +675,21 @@ pub struct PotionStats {
     pub description_postscript: Option<String>,
     /// true if this potion rolls a None into non-None
     pub is_addition_potion: bool,
+    /// true if this should dynamically build the potion weights (addition and full reroll)
+    pub build_list: bool,
     /// true if all potions in potion_weights should be applied
     pub do_all_listed_potions: bool,
     /// true if this potion changes the color but keeps style of a trait
     pub dye_style: bool,
     /// true if this potion can only be used if the skull has a jaw
     pub jaw_only: bool,
+    /// true if this potion represents a category when building potion weights
+    pub category_rep: bool,
+    /// desired approximate length of the recipe generated for this potion. Contract will
+    /// randomly choose to adjust this length.  Acceptable input is 5-9, inclusive
+    pub complexity: u8,
+    /// desired average commonality of ingredients in the recipe
+    pub commonality: u8,
 }
 
 /// displayable rules of potion effects
@@ -668,6 +711,8 @@ pub struct DisplayPotionRules {
     pub description_postscript: Option<String>,
     /// true if this potion rolls a None into non-None
     pub is_addition_potion: bool,
+    /// true if this builds potion weights dynamically (addition and full reroll)
+    pub builds_potion_list: bool,
     /// true if all potions in potion_weights should be applied
     pub do_all_listed_potions: bool,
     /// true if this potion changes the color but keeps style of a trait
@@ -676,8 +721,8 @@ pub struct DisplayPotionRules {
     pub is_disabled: bool,
     /// true if this potion can only be used if the skull has a jaw
     pub jaw_only: bool,
-    /// true if the recipe has been generated
-    pub has_recipe: bool,
+    /// true if this potion represents a category when building potion weights
+    pub category_rep: bool,
     /// testing fields TODO remove
     pub testing: Testing,
 }
@@ -736,6 +781,15 @@ pub struct IngredientQty {
     pub ingredient: String,
     /// quantity of this ingredient
     pub quantity: u32,
+}
+
+/// an ingredient and its commonality score
+#[derive(Serialize, Deserialize, JsonSchema, Clone, PartialEq, Eq, Debug)]
+pub struct IngredientCommonality {
+    /// name of the ingredient
+    pub ingredient: String,
+    /// commonality score of this ingredient to use during recipe generation
+    pub commonality: u8,
 }
 
 /// displayable info about crating state
@@ -929,18 +983,38 @@ impl Weighted for PotionWeight {
     /// Returns u16
     ///
     /// returns the weight of this potion
-    fn weight(&self) -> u16 {
-        self.weight
+    fn weight(&self) -> u64 {
+        self.weight as u64
     }
 }
 
 /// some query fields only used during testing TODO remove
 #[derive(Serialize, Deserialize, JsonSchema, Clone, PartialEq, Eq, Debug)]
 pub struct Testing {
+    /// this potion's name
+    pub name: String,
     /// true if this potion has been discovered
     pub found: bool,
     /// this potion's recipe
     pub recipe: Vec<String>,
     /// this potion's image key
     pub image_key: u16,
+    /// desired approximate length of the recipe generated for this potion. Contract will
+    /// randomly choose to adjust this length.  Acceptable input is 5-9, inclusive
+    pub complexity: u8,
+    /// desired average commonality of ingredients in the recipe
+    pub commonality: u8,
+}
+
+/// info used to override category representative potions in the build list
+#[derive(Serialize, Deserialize, JsonSchema, Clone, PartialEq, Eq, Debug)]
+pub struct CategoryRepOverride {
+    /// optionally specify the category by name.  If both category_by_name and category_by_index
+    /// are provided, category_by_name will be ignored
+    pub category_by_name: Option<String>,
+    /// optionally specify the category by index.  If both category_by_name and category_by_index
+    /// are provided, category_by_name will be ignored
+    pub category_by_index: Option<u8>,
+    /// optional potion index to use for this category.  None removes an existing
+    pub potion_index: Option<u16>,
 }
