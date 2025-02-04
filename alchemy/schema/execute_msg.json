@@ -395,43 +395,6 @@
       "additionalProperties": false
     },
     {
-      "description": "enable potions",
-      "type": "object",
-      "required": [
-        "enable_potions"
-      ],
-      "properties": {
-        "enable_potions": {
-          "type": "object",
-          "properties": {
-            "by_index": {
-              "description": "optional list of potion indices to enable",
-              "type": [
-                "array",
-                "null"
-              ],
-              "items": {
-                "type": "integer",
-                "format": "uint16",
-                "minimum": 0.0
-              }
-            },
-            "by_name": {
-              "description": "optional list of potion names to enable",
-              "type": [
-                "array",
-                "null"
-              ],
-              "items": {
-                "type": "string"
-              }
-            }
-          }
-        }
-      },
-      "additionalProperties": false
-    },
-    {
       "description": "add ingredients",
       "type": "object",
       "required": [

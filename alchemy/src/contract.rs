@@ -230,9 +230,6 @@ pub fn execute(deps: DepsMut, env: Env, info: MessageInfo, msg: ExecuteMsg) -> S
         ExecuteMsg::DisablePotions { by_name, by_index } => {
             try_toggle_potions(deps, &info.sender, by_name, by_index, true)
         }
-        ExecuteMsg::EnablePotions { by_name, by_index } => {
-            try_toggle_potions(deps, &info.sender, by_name, by_index, false)
-        }
         ExecuteMsg::DefinePotions { potion_definitions } => {
             try_define_potions(deps, &env, &info.sender, potion_definitions)
         }
@@ -1121,6 +1118,7 @@ fn try_toggle_potions(
     let names = by_name.unwrap_or_default();
     let mut indices = by_index.unwrap_or_default();
     let mut alc_st: AlchemyState = load(deps.storage, ALCHEMY_STATE_KEY)?;
+    let mut trn_st: TransmuteState = load(deps.storage, TRANSMUTE_STATE_KEY)?;
     let idx_store = ReadonlyPrefixedStorage::new(deps.storage, PREFIX_NAME_2_POTION_IDX);
     // convert the names into indices and combine the lists
     let mut keywords = Vec::new();
@@ -1149,13 +1147,42 @@ fn try_toggle_potions(
             if !alc_st.disabled.contains(ptn) {
                 alc_st.disabled.push(*ptn);
             }
+            // check if this potion is a category representative and clear the rep if so
+            if let Some(cat_idx) = trn_st.build_list.iter().position(|p| *p == *ptn) {
+                let mut rul_store = PrefixedStorage::new(deps.storage, PREFIX_POTION_RULES);
+                change_cat_rep(
+                    &mut rul_store,
+                    &mut trn_st.build_list,
+                    cat_idx,
+                    u16::MAX,
+                    false,
+                )?;
+            }
+            // remove the recipe from the discovery list
+            let p2r_store = ReadonlyPrefixedStorage::new(deps.storage, PREFIX_POTION_IDX_2_RECIPE);
+            if let Some(recipe) = may_load::<Vec<u8>>(&p2r_store, &ptn.to_le_bytes())? {
+                let recipe_len = recipe.len() as u8;
+                let mut by_len_store = PrefixedStorage::new(deps.storage, PREFIX_RECIPES_BY_LEN);
+                let by_len_key = recipe_len.to_le_bytes();
+                // get all recipes with same length
+                let mut cookbook =
+                    may_load::<Vec<RecipeIdx>>(&by_len_store, &by_len_key)?.unwrap_or_default();
+                if let Some(fnd) = cookbook.iter().position(|r| r.recipe == recipe) {
+                    cookbook.swap_remove(fnd);
+                    save(&mut by_len_store, &by_len_key, &cookbook)?;
+                }
+            }
         }
+        // remove disabled potions from the jaw_only list
+        trn_st.jaw_only.retain(|p| !indices.contains(p));
     } else {
         // enabling
         alc_st.disabled.retain(|p| !indices.contains(p));
     }
     // save the disabled list
     save(deps.storage, ALCHEMY_STATE_KEY, &alc_st)?;
+    // save the build and jaw only list
+    save(deps.storage, TRANSMUTE_STATE_KEY, &trn_st)?;
 
     Ok(
         Response::new().set_data(to_binary(&ExecuteAnswer::DisabledPotions {
